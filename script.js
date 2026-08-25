@@ -5,10 +5,10 @@
  * Z controls vertical map position.
  * Y is stored and displayed for reference only.
  *
- * Version 4.2:
+ * Version 4.3:
  * Shared Supabase storage, optional Y, Minecraft 16×16 chunk borders,
- * zoom/pan/Fit Map controls, clean grid behavior, and multiline chunk
- * coordinate details are all included in this baseline version.
+ * zoom/pan/Fit Map controls, multiline chunk details, and a chunk-aligned
+ * coordinate reference grid so major lines never sit beside chunk borders.
  **********************************************************************/
 
 /**********************************************************************
@@ -730,6 +730,23 @@ function chooseGridStep(visibleSpanBlocks) {
   return nice * magnitude;
 }
 
+function chooseChunkAlignedMajorStep(visibleSpanBlocks) {
+  // When chunk borders are visible, all heavier reference lines should also
+  // land on chunk borders. Start with 4 chunks = 64 blocks, then double:
+  // 64, 128, 256, 512, 1024...
+  //
+  // Aim for roughly 8–12 major reference lines across the current view.
+  const target = Math.max(visibleSpanBlocks / 9, CHUNK_SIZE * 4);
+
+  let step = CHUNK_SIZE * 4;
+
+  while (step < target) {
+    step *= 2;
+  }
+
+  return step;
+}
+
 /**********************************************************************
  * 9) MAP RENDERING
  **********************************************************************/
@@ -754,22 +771,37 @@ function renderMap() {
   const transform = getMapTransform();
   const visibleSpanX = transform.visibleMaxX - transform.visibleMinX;
   const visibleSpanZ = transform.visibleMaxZ - transform.visibleMinZ;
-  const majorStep = chooseGridStep(Math.max(visibleSpanX, visibleSpanZ));
-  const minorStep = majorStep / 5;
+  const largestVisibleSpan = Math.max(visibleSpanX, visibleSpanZ);
 
   const chunkGridState = drawChunkGrid(transform);
 
-  // When exact 16×16 chunk borders are visible, they become the small grid.
-  // Keep only the major coordinate reference lines/labels from the original
-  // grid so the two systems do not create a plaid/overlapping effect.
-  const showMinorCoordinateGrid = chunkGridState !== "shown";
+  if (chunkGridState === "shown") {
+    // Chunk borders are now the fine grid. Draw only heavier coordinate
+    // references that are ALSO exact chunk boundaries. This prevents lines
+    // like X 100 from sitting a few blocks beside X 96, which created the
+    // doubled/plaid appearance.
+    const chunkAlignedMajorStep =
+      chooseChunkAlignedMajorStep(largestVisibleSpan);
 
-  drawGrid(
-    transform,
-    minorStep,
-    majorStep,
-    showMinorCoordinateGrid
-  );
+    drawGrid(
+      transform,
+      chunkAlignedMajorStep,
+      chunkAlignedMajorStep,
+      false
+    );
+  } else {
+    // When chunks are too small to display, return to the ordinary adaptive
+    // coordinate grid.
+    const majorStep = chooseGridStep(largestVisibleSpan);
+    const minorStep = majorStep / 5;
+
+    drawGrid(
+      transform,
+      minorStep,
+      majorStep,
+      true
+    );
+  }
 
   drawSelectedChunk(transform);
   drawMarkers(transform);
