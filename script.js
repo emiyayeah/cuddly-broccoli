@@ -5,10 +5,10 @@
  * Z controls vertical map position.
  * Y is stored and displayed for reference only.
  *
- * Version 4:
- * Locations come from the shared Supabase database, Y may be left blank,
- * Minecraft's 16×16 chunk borders are drawn directly from X/Z, and the
- * map can now zoom, pan, and return to a fitted all-locations view.
+ * Version 4.2:
+ * Shared Supabase storage, optional Y, Minecraft 16×16 chunk borders,
+ * zoom/pan/Fit Map controls, clean grid behavior, and multiline chunk
+ * coordinate details are all included in this baseline version.
  **********************************************************************/
 
 /**********************************************************************
@@ -757,8 +757,20 @@ function renderMap() {
   const majorStep = chooseGridStep(Math.max(visibleSpanX, visibleSpanZ));
   const minorStep = majorStep / 5;
 
-  drawGrid(transform, minorStep, majorStep);
   const chunkGridState = drawChunkGrid(transform);
+
+  // When exact 16×16 chunk borders are visible, they become the small grid.
+  // Keep only the major coordinate reference lines/labels from the original
+  // grid so the two systems do not create a plaid/overlapping effect.
+  const showMinorCoordinateGrid = chunkGridState !== "shown";
+
+  drawGrid(
+    transform,
+    minorStep,
+    majorStep,
+    showMinorCoordinateGrid
+  );
+
   drawSelectedChunk(transform);
   drawMarkers(transform);
 
@@ -872,7 +884,7 @@ function drawSelectedChunk(transform) {
   chunkLayer.appendChild(rect);
 }
 
-function drawGrid(transform, minorStep, majorStep) {
+function drawGrid(transform, minorStep, majorStep, showMinorLines = true) {
   const ns = "http://www.w3.org/2000/svg";
 
   const firstX =
@@ -896,20 +908,24 @@ function drawGrid(transform, minorStep, majorStep) {
     const isAxis = Math.abs(x) < minorStep / 1000;
     const isMajor = isMultipleOf(x, majorStep);
 
-    const line = document.createElementNS(ns, "line");
-    line.setAttribute("x1", screenX);
-    line.setAttribute("x2", screenX);
-    line.setAttribute("y1", 0);
-    line.setAttribute("y2", MAP_HEIGHT);
-    line.setAttribute(
-      "class",
-      isAxis
-        ? "axis-line"
-        : isMajor
-          ? "grid-line-major"
-          : "grid-line-minor"
-    );
-    gridLayer.appendChild(line);
+    // If chunks are supplying the fine grid, suppress the ordinary minor
+    // coordinate lines. Axis and major reference lines still remain.
+    if (showMinorLines || isMajor || isAxis) {
+      const line = document.createElementNS(ns, "line");
+      line.setAttribute("x1", screenX);
+      line.setAttribute("x2", screenX);
+      line.setAttribute("y1", 0);
+      line.setAttribute("y2", MAP_HEIGHT);
+      line.setAttribute(
+        "class",
+        isAxis
+          ? "axis-line"
+          : isMajor
+            ? "grid-line-major"
+            : "grid-line-minor"
+      );
+      gridLayer.appendChild(line);
+    }
 
     if (isMajor && screenX > 36 && screenX < MAP_WIDTH - 36) {
       const label = document.createElementNS(ns, "text");
@@ -936,20 +952,22 @@ function drawGrid(transform, minorStep, majorStep) {
     const isAxis = Math.abs(z) < minorStep / 1000;
     const isMajor = isMultipleOf(z, majorStep);
 
-    const line = document.createElementNS(ns, "line");
-    line.setAttribute("x1", 0);
-    line.setAttribute("x2", MAP_WIDTH);
-    line.setAttribute("y1", screenY);
-    line.setAttribute("y2", screenY);
-    line.setAttribute(
-      "class",
-      isAxis
-        ? "axis-line"
-        : isMajor
-          ? "grid-line-major"
-          : "grid-line-minor"
-    );
-    gridLayer.appendChild(line);
+    if (showMinorLines || isMajor || isAxis) {
+      const line = document.createElementNS(ns, "line");
+      line.setAttribute("x1", 0);
+      line.setAttribute("x2", MAP_WIDTH);
+      line.setAttribute("y1", screenY);
+      line.setAttribute("y2", screenY);
+      line.setAttribute(
+        "class",
+        isAxis
+          ? "axis-line"
+          : isMajor
+            ? "grid-line-major"
+            : "grid-line-minor"
+      );
+      gridLayer.appendChild(line);
+    }
 
     if (isMajor && screenY > 28 && screenY < MAP_HEIGHT - 20) {
       const label = document.createElementNS(ns, "text");
