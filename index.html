@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="theme-color" content="#1d2a20" />
+  <title>Minecraft Realm Map</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <main class="app-shell">
+    <header class="page-header">
+      <div>
+        <p class="eyebrow">Minecraft Realm Waypoints</p>
+        <h1>Coordinate Map</h1>
+        <p class="subtitle">
+          Add places using Minecraft X, Y, Z coordinates. X and Z control map position;
+          Y is saved for reference.
+        </p>
+      </div>
+    </header>
+
+    <section class="entry-panel" aria-labelledby="location-form-heading">
+      <div class="section-heading-row">
+        <div>
+          <h2 id="location-form-heading">Add a location</h2>
+          <p id="formModeText" class="section-note">Enter a named place from your world.</p>
+        </div>
+      </div>
+
+      <form id="locationForm" class="location-form">
+        <div class="field field-name">
+          <label for="locationName">Name</label>
+          <input
+            id="locationName"
+            name="locationName"
+            type="text"
+            maxlength="80"
+            placeholder="Village, Spawn, Skeleton Farm..."
+            autocomplete="off"
+            required
+          />
+        </div>
+
+        <div class="coordinate-fields">
+          <div class="field">
+            <label for="xCoord">X</label>
+            <input id="xCoord" name="xCoord" type="number" step="1" inputmode="numeric" placeholder="0" required />
+          </div>
+          <div class="field">
+            <label for="yCoord">Y</label>
+            <input id="yCoord" name="yCoord" type="number" step="1" inputmode="numeric" placeholder="64" required />
+          </div>
+          <div class="field">
+            <label for="zCoord">Z</label>
+            <input id="zCoord" name="zCoord" type="number" step="1" inputmode="numeric" placeholder="0" required />
+          </div>
+        </div>
+
+        <div class="field field-notes">
+          <label for="locationNotes">Notes <span class="optional">optional</span></label>
+          <input
+            id="locationNotes"
+            name="locationNotes"
+            type="text"
+            maxlength="160"
+            placeholder="Entrance by the ruined portal"
+            autocomplete="off"
+          />
+        </div>
+
+        <div class="form-actions">
+          <button id="saveLocationBtn" class="primary-button" type="submit">Add location</button>
+          <button id="cancelEditBtn" class="secondary-button hidden" type="button">Cancel edit</button>
+        </div>
+
+        <p id="formMessage" class="form-message" role="status" aria-live="polite"></p>
+      </form>
+    </section>
+
+    <section class="map-section" aria-labelledby="map-heading">
+      <div class="section-heading-row map-heading-row">
+        <div>
+          <h2 id="map-heading">Map</h2>
+          <p id="mapStatus" class="section-note">Add your first location to start the map.</p>
+        </div>
+        <div class="map-key" aria-label="Map orientation">
+          <span>↑ North −Z</span>
+          <span>East +X →</span>
+          <span>↓ South +Z</span>
+          <span>← West −X</span>
+        </div>
+      </div>
+
+      <div class="map-frame">
+        <svg
+          id="mapSvg"
+          class="map-svg"
+          viewBox="0 0 1000 700"
+          role="img"
+          aria-labelledby="mapTitle mapDescription"
+        >
+          <title id="mapTitle">Minecraft coordinate waypoint map</title>
+          <desc id="mapDescription">
+            Locations are positioned proportionally using X horizontally and Z vertically.
+          </desc>
+          <g id="gridLayer"></g>
+          <g id="markerLayer"></g>
+          <g id="emptyLayer">
+            <text x="500" y="335" class="empty-map-title" text-anchor="middle">No locations yet</text>
+            <text x="500" y="370" class="empty-map-subtitle" text-anchor="middle">Add coordinates above and they will appear here.</text>
+          </g>
+        </svg>
+      </div>
+
+      <div id="selectedLocationCard" class="selected-card hidden" aria-live="polite"></div>
+    </section>
+
+    <section class="locations-section" aria-labelledby="locations-heading">
+      <div class="section-heading-row locations-heading-row">
+        <div>
+          <h2 id="locations-heading">Locations</h2>
+          <p id="locationCount" class="section-note">0 saved locations</p>
+        </div>
+
+        <div class="search-wrap">
+          <label class="sr-only" for="locationSearch">Search locations</label>
+          <input id="locationSearch" type="search" placeholder="Search locations" autocomplete="off" />
+        </div>
+      </div>
+
+      <div id="locationsList" class="locations-list"></div>
+      <p id="noSearchResults" class="empty-list-message hidden">No locations match that search.</p>
+    </section>
+
+    <footer class="page-footer">
+      <p>
+        Version 1 saves locations only in this browser. Shared Realm storage comes next.
+      </p>
+    </footer>
+  </main>
+
+  <script src="script.js"></script>
+</body>
+</html>
