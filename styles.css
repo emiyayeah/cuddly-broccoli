@@ -395,6 +395,7 @@ h2 {
   color: var(--marker-selected);
   font-size: 0.82rem;
   font-weight: 750;
+  white-space: pre-line;
 }
 
 .marker-button {
