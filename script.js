@@ -5,9 +5,10 @@
  * Z controls vertical map position.
  * Y is stored and displayed for reference only.
  *
- * Version 3:
+ * Version 4:
  * Locations come from the shared Supabase database, Y may be left blank,
- * and Minecraft's 16×16 chunk borders are drawn directly from X/Z.
+ * Minecraft's 16×16 chunk borders are drawn directly from X/Z, and the
+ * map can now zoom, pan, and return to a fitted all-locations view.
  **********************************************************************/
 
 /**********************************************************************
@@ -31,6 +32,16 @@ const CHUNK_SIZE = 16;
 // The selected location's chunk is still highlighted and described.
 const MAX_CHUNK_LINES = 2200;
 
+// Hide individual chunk borders when one 16-block chunk would be too tiny
+// to read on the actual screen. Zooming in makes them appear automatically.
+const MIN_CHUNK_SCREEN_PIXELS = 8;
+
+// Map navigation settings.
+const MAX_MAP_SCALE = 12;
+const ZOOM_BUTTON_FACTOR = 1.4;
+const WHEEL_ZOOM_SPEED = 0.0015;
+const KEYBOARD_PAN_FRACTION = 0.12;
+
 /**********************************************************************
  * 2) STATE
  **********************************************************************/
@@ -40,6 +51,19 @@ let selectedLocationId = null;
 let editingLocationId = null;
 let searchText = "";
 let databaseReady = false;
+
+// Current map camera. These are Minecraft world coordinates plus a scale
+// measured in SVG map units per Minecraft block.
+let mapViewCenterX = 0;
+let mapViewCenterZ = 0;
+let mapViewScale = null;
+
+// Mouse-drag panning state.
+let panState = null;
+
+// Wheel/drag events can fire very quickly, so map redraws are grouped into
+// animation frames instead of rebuilding the SVG dozens of times at once.
+let pendingMapRenderFrame = null;
 
 /**********************************************************************
  * 3) DOM REFERENCES
@@ -58,6 +82,12 @@ const formModeText = document.getElementById("formModeText");
 const formMessage = document.getElementById("formMessage");
 
 const mapStatus = document.getElementById("mapStatus");
+const mapSvg = document.getElementById("mapSvg");
+const zoomOutBtn = document.getElementById("zoomOutBtn");
+const zoomInBtn = document.getElementById("zoomInBtn");
+const fitMapBtn = document.getElementById("fitMapBtn");
+const mapZoomLabel = document.getElementById("mapZoomLabel");
+
 const gridLayer = document.getElementById("gridLayer");
 const chunkLayer = document.getElementById("chunkLayer");
 const markerLayer = document.getElementById("markerLayer");
@@ -159,6 +189,9 @@ async function loadSharedMap() {
 
     locations = await window.realmDatabase.getLocations();
     databaseReady = true;
+
+    // The first successful load starts with every shared waypoint visible.
+    fitMapToLocations(false);
 
     // If a selected or edited location disappeared since our last refresh,
     // safely clear that state.
@@ -270,6 +303,9 @@ locationForm.addEventListener("submit", async (event) => {
       locations.push(newLocation);
       selectedLocationId = newLocation.id;
 
+      // A new waypoint may be outside the current camera, so refit once.
+      fitMapToLocations(false);
+
       locationForm.reset();
       setFormMessage(`Added ${name} to the shared map.`);
       locationNameInput.focus();
@@ -348,6 +384,8 @@ async function deleteLocation(id) {
     if (editingLocationId === id) {
       cancelEditing();
     }
+
+    fitMapToLocations(false);
 
     setFormMessage(`Deleted ${location.name} from the shared map.`);
     renderAll();
@@ -443,7 +481,7 @@ function renderLocationList() {
  * 8) MAP MATH
  **********************************************************************/
 
-function getMapTransform() {
+function getFitTransform() {
   if (locations.length === 0) {
     return {
       centerX: 0,
@@ -497,6 +535,175 @@ function getMapTransform() {
   };
 }
 
+function setMapView(centerX, centerZ, scale) {
+  mapViewCenterX = centerX;
+  mapViewCenterZ = centerZ;
+  mapViewScale = scale;
+}
+
+function fitMapToLocations(renderNow = true) {
+  const fit = getFitTransform();
+  setMapView(fit.centerX, fit.centerZ, fit.scale);
+
+  if (renderNow) {
+    renderMap();
+  }
+}
+
+function getMapTransform() {
+  if (!Number.isFinite(mapViewScale) || mapViewScale <= 0) {
+    const fit = getFitTransform();
+    setMapView(fit.centerX, fit.centerZ, fit.scale);
+  }
+
+  const scale = mapViewScale;
+  const visibleSpanX = MAP_WIDTH / scale;
+  const visibleSpanZ = MAP_HEIGHT / scale;
+
+  return {
+    centerX: mapViewCenterX,
+    centerZ: mapViewCenterZ,
+    scale,
+    blocksPerPixel: 1 / scale,
+    visibleMinX: mapViewCenterX - visibleSpanX / 2,
+    visibleMaxX: mapViewCenterX + visibleSpanX / 2,
+    visibleMinZ: mapViewCenterZ - visibleSpanZ / 2,
+    visibleMaxZ: mapViewCenterZ + visibleSpanZ / 2,
+  };
+}
+
+function getMinimumMapScale() {
+  return getFitTransform().scale;
+}
+
+function getMaximumMapScale() {
+  return Math.max(MAX_MAP_SCALE, getMinimumMapScale());
+}
+
+function clamp(value, minimum, maximum) {
+  return Math.min(maximum, Math.max(minimum, value));
+}
+
+function clientPointToMap(clientX, clientY) {
+  const rect = mapSvg.getBoundingClientRect();
+
+  if (rect.width <= 0 || rect.height <= 0) {
+    return { x: MAP_WIDTH / 2, y: MAP_HEIGHT / 2 };
+  }
+
+  return {
+    x: ((clientX - rect.left) / rect.width) * MAP_WIDTH,
+    y: ((clientY - rect.top) / rect.height) * MAP_HEIGHT,
+  };
+}
+
+function zoomMapAt(mapX, mapY, factor) {
+  if (locations.length === 0 || !Number.isFinite(factor) || factor <= 0) {
+    return;
+  }
+
+  const current = getMapTransform();
+  const minimumScale = getMinimumMapScale();
+  const maximumScale = getMaximumMapScale();
+
+  const newScale = clamp(
+    current.scale * factor,
+    minimumScale,
+    maximumScale
+  );
+
+  // The farthest zoom-out state is always the real fit-all-locations view.
+  // That prevents a user from being fully zoomed out but still panned away
+  // from the waypoints.
+  if (newScale <= minimumScale * 1.00001) {
+    const fit = getFitTransform();
+    setMapView(fit.centerX, fit.centerZ, fit.scale);
+    scheduleMapRender();
+    return;
+  }
+
+  if (Math.abs(newScale - current.scale) < 0.0000001) {
+    updateMapControls();
+    return;
+  }
+
+  // Convert the cursor's current screen position to the Minecraft X/Z point
+  // beneath it. After changing scale, shift the center so the same world
+  // point stays under the cursor.
+  const worldX =
+    current.centerX + (mapX - MAP_WIDTH / 2) / current.scale;
+  const worldZ =
+    current.centerZ + (mapY - MAP_HEIGHT / 2) / current.scale;
+
+  mapViewCenterX =
+    worldX - (mapX - MAP_WIDTH / 2) / newScale;
+  mapViewCenterZ =
+    worldZ - (mapY - MAP_HEIGHT / 2) / newScale;
+  mapViewScale = newScale;
+
+  scheduleMapRender();
+}
+
+function panMapByWorld(deltaX, deltaZ) {
+  if (locations.length === 0) return;
+
+  mapViewCenterX += deltaX;
+  mapViewCenterZ += deltaZ;
+  scheduleMapRender();
+}
+
+function panMapByKeyboard(directionX, directionZ) {
+  const transform = getMapTransform();
+  const visibleSpanX = transform.visibleMaxX - transform.visibleMinX;
+  const visibleSpanZ = transform.visibleMaxZ - transform.visibleMinZ;
+
+  panMapByWorld(
+    directionX * visibleSpanX * KEYBOARD_PAN_FRACTION,
+    directionZ * visibleSpanZ * KEYBOARD_PAN_FRACTION
+  );
+}
+
+function scheduleMapRender() {
+  if (pendingMapRenderFrame !== null) {
+    return;
+  }
+
+  pendingMapRenderFrame = window.requestAnimationFrame(() => {
+    pendingMapRenderFrame = null;
+    renderMap();
+  });
+}
+
+function updateMapControls() {
+  const hasLocations = locations.length > 0;
+
+  zoomOutBtn.disabled = !hasLocations;
+  zoomInBtn.disabled = !hasLocations;
+  fitMapBtn.disabled = !hasLocations;
+
+  if (!hasLocations) {
+    mapZoomLabel.textContent = "Fit";
+    return;
+  }
+
+  const current = getMapTransform();
+  const minimumScale = getMinimumMapScale();
+  const maximumScale = getMaximumMapScale();
+
+  const zoomPercent = (current.scale / minimumScale) * 100;
+
+  zoomOutBtn.disabled =
+    current.scale <= minimumScale * 1.00001;
+
+  zoomInBtn.disabled =
+    current.scale >= maximumScale * 0.99999;
+
+  mapZoomLabel.textContent =
+    zoomPercent <= 100.5
+      ? "Fit"
+      : `${formatNumber(Math.round(zoomPercent))}%`;
+}
+
 function mapXToScreen(x, transform) {
   return MAP_WIDTH / 2 + (x - transform.centerX) * transform.scale;
 }
@@ -540,6 +747,7 @@ function renderMap() {
       ? "Add your first location to start the shared map."
       : "Loading shared locations...";
     selectedLocationCard.classList.add("hidden");
+    updateMapControls();
     return;
   }
 
@@ -550,17 +758,23 @@ function renderMap() {
   const minorStep = majorStep / 5;
 
   drawGrid(transform, minorStep, majorStep);
-  const chunkGridVisible = drawChunkGrid(transform);
+  const chunkGridState = drawChunkGrid(transform);
   drawSelectedChunk(transform);
   drawMarkers(transform);
 
   const blocksPer100Pixels = Math.round(transform.blocksPerPixel * 100);
 
+  const chunkStatus =
+    chunkGridState === "shown"
+      ? "16×16 chunk borders shown"
+      : "zoom in to show chunk borders";
+
   mapStatus.textContent =
     `${locations.length} ${locations.length === 1 ? "location" : "locations"} · ` +
     `about ${formatNumber(blocksPer100Pixels)} blocks per 100 screen pixels · ` +
-    (chunkGridVisible ? "16×16 chunk borders shown" : "chunk grid too dense at this scale");
+    chunkStatus;
 
+  updateMapControls();
   renderSelectedLocation();
 }
 
@@ -577,11 +791,20 @@ function drawChunkGrid(transform) {
   const horizontalLineCount = lastChunkZ - firstChunkZ + 1;
   const totalLineCount = verticalLineCount + horizontalLineCount;
 
-  // Exact 16-block borders become visually meaningless when there are
-  // thousands of them packed into the current view. We hide only the full
-  // grid in that case; the selected chunk remains visible.
-  if (totalLineCount > MAX_CHUNK_LINES) {
-    return false;
+  const rect = mapSvg.getBoundingClientRect();
+  const cssPixelsPerMapUnit =
+    rect.width > 0 ? rect.width / MAP_WIDTH : 1;
+  const chunkSizeOnScreen =
+    CHUNK_SIZE * transform.scale * cssPixelsPerMapUnit;
+
+  // A 16-block grid becomes visual noise when each chunk would only be a
+  // handful of pixels wide. Hide it while zoomed out and bring it back
+  // automatically as the user zooms in.
+  if (
+    chunkSizeOnScreen < MIN_CHUNK_SCREEN_PIXELS ||
+    totalLineCount > MAX_CHUNK_LINES
+  ) {
+    return "hidden";
   }
 
   for (let chunkX = firstChunkX; chunkX <= lastChunkX; chunkX += 1) {
@@ -622,7 +845,7 @@ function drawChunkGrid(transform) {
     chunkLayer.appendChild(line);
   }
 
-  return true;
+  return "shown";
 }
 
 function drawSelectedChunk(transform) {
@@ -769,6 +992,17 @@ function drawMarkers(transform) {
     const x = mapXToScreen(Number(location.x), transform);
     const y = mapZToScreen(Number(location.z), transform);
 
+    // Do not pin labels to an edge when a waypoint is actually outside the
+    // camera. It will reappear naturally when the map is panned back.
+    if (
+      x < -80 ||
+      x > MAP_WIDTH + 80 ||
+      y < -60 ||
+      y > MAP_HEIGHT + 60
+    ) {
+      return;
+    }
+
     const group = document.createElementNS(ns, "g");
     group.setAttribute("class", "marker-button");
     group.classList.toggle("selected", selectedLocationId === location.id);
@@ -876,8 +1110,202 @@ function renderSelectedLocation() {
     });
 }
 
+
 /**********************************************************************
- * 11) FULL RENDER
+ * 11) MAP NAVIGATION
+ **********************************************************************/
+
+zoomInBtn.addEventListener("click", () => {
+  zoomMapAt(
+    MAP_WIDTH / 2,
+    MAP_HEIGHT / 2,
+    ZOOM_BUTTON_FACTOR
+  );
+});
+
+zoomOutBtn.addEventListener("click", () => {
+  zoomMapAt(
+    MAP_WIDTH / 2,
+    MAP_HEIGHT / 2,
+    1 / ZOOM_BUTTON_FACTOR
+  );
+});
+
+fitMapBtn.addEventListener("click", () => {
+  fitMapToLocations();
+  mapSvg.focus({ preventScroll: true });
+});
+
+mapSvg.addEventListener(
+  "wheel",
+  (event) => {
+    if (locations.length === 0) return;
+
+    event.preventDefault();
+
+    const point = clientPointToMap(
+      event.clientX,
+      event.clientY
+    );
+
+    // Exponential zoom feels smooth on both ordinary mouse wheels and
+    // high-resolution trackpads. Clamp a single event so one wild wheel
+    // delta cannot teleport the camera.
+    const rawFactor = Math.exp(
+      -event.deltaY * WHEEL_ZOOM_SPEED
+    );
+    const factor = clamp(rawFactor, 0.72, 1.38);
+
+    zoomMapAt(point.x, point.y, factor);
+  },
+  { passive: false }
+);
+
+// Mouse drag pans the camera. We intentionally leave touch gestures alone;
+// phone/tablet users can always use the visible zoom and Fit Map buttons.
+mapSvg.addEventListener("pointerdown", (event) => {
+  if (
+    event.pointerType !== "mouse" ||
+    event.button !== 0 ||
+    locations.length === 0
+  ) {
+    return;
+  }
+
+  // Clicking a marker should select it, not start a pan.
+  if (
+    event.target.closest &&
+    event.target.closest(".marker-button")
+  ) {
+    return;
+  }
+
+  const transform = getMapTransform();
+  const rect = mapSvg.getBoundingClientRect();
+
+  panState = {
+    pointerId: event.pointerId,
+    startClientX: event.clientX,
+    startClientY: event.clientY,
+    startCenterX: transform.centerX,
+    startCenterZ: transform.centerZ,
+    scale: transform.scale,
+    rectWidth: Math.max(rect.width, 1),
+    rectHeight: Math.max(rect.height, 1),
+  };
+
+  mapSvg.setPointerCapture(event.pointerId);
+  mapSvg.classList.add("is-panning");
+  event.preventDefault();
+});
+
+mapSvg.addEventListener("pointermove", (event) => {
+  if (
+    !panState ||
+    event.pointerId !== panState.pointerId
+  ) {
+    return;
+  }
+
+  const deltaMapX =
+    ((event.clientX - panState.startClientX) /
+      panState.rectWidth) *
+    MAP_WIDTH;
+
+  const deltaMapY =
+    ((event.clientY - panState.startClientY) /
+      panState.rectHeight) *
+    MAP_HEIGHT;
+
+  // Dragging the picture right means the camera moves west, and dragging
+  // it down means the camera moves north.
+  mapViewCenterX =
+    panState.startCenterX - deltaMapX / panState.scale;
+  mapViewCenterZ =
+    panState.startCenterZ - deltaMapY / panState.scale;
+
+  scheduleMapRender();
+});
+
+function finishMapPan(event) {
+  if (
+    !panState ||
+    event.pointerId !== panState.pointerId
+  ) {
+    return;
+  }
+
+  if (mapSvg.hasPointerCapture(event.pointerId)) {
+    mapSvg.releasePointerCapture(event.pointerId);
+  }
+
+  panState = null;
+  mapSvg.classList.remove("is-panning");
+}
+
+mapSvg.addEventListener("pointerup", finishMapPan);
+mapSvg.addEventListener("pointercancel", finishMapPan);
+
+mapSvg.addEventListener("keydown", (event) => {
+  if (locations.length === 0) return;
+
+  switch (event.key) {
+    case "+":
+    case "=":
+      event.preventDefault();
+      zoomMapAt(
+        MAP_WIDTH / 2,
+        MAP_HEIGHT / 2,
+        ZOOM_BUTTON_FACTOR
+      );
+      break;
+
+    case "-":
+    case "_":
+      event.preventDefault();
+      zoomMapAt(
+        MAP_WIDTH / 2,
+        MAP_HEIGHT / 2,
+        1 / ZOOM_BUTTON_FACTOR
+      );
+      break;
+
+    case "0":
+    case "f":
+    case "F":
+      event.preventDefault();
+      fitMapToLocations();
+      break;
+
+    case "ArrowLeft":
+      event.preventDefault();
+      panMapByKeyboard(-1, 0);
+      break;
+
+    case "ArrowRight":
+      event.preventDefault();
+      panMapByKeyboard(1, 0);
+      break;
+
+    case "ArrowUp":
+      event.preventDefault();
+      panMapByKeyboard(0, -1);
+      break;
+
+    case "ArrowDown":
+      event.preventDefault();
+      panMapByKeyboard(0, 1);
+      break;
+  }
+});
+
+// The world camera is stored in Minecraft coordinates, so resizing does not
+// change what we are looking at. It can change when chunk borders become
+// visually useful, though, so redraw after a resize.
+window.addEventListener("resize", scheduleMapRender);
+
+/**********************************************************************
+ * 12) FULL RENDER
  **********************************************************************/
 
 function renderAll() {
@@ -886,7 +1314,7 @@ function renderAll() {
 }
 
 /**********************************************************************
- * 12) START THE APP
+ * 13) START THE APP
  **********************************************************************/
 
 renderAll();

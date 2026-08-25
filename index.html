@@ -92,17 +92,51 @@
         </div>
       </div>
 
+      <div class="map-toolbar">
+        <div class="map-controls" aria-label="Map zoom controls">
+          <button
+            id="zoomOutBtn"
+            class="map-control-button"
+            type="button"
+            aria-label="Zoom out"
+            title="Zoom out"
+          >−</button>
+
+          <button
+            id="zoomInBtn"
+            class="map-control-button"
+            type="button"
+            aria-label="Zoom in"
+            title="Zoom in"
+          >+</button>
+
+          <button
+            id="fitMapBtn"
+            class="map-control-button map-fit-button"
+            type="button"
+          >Fit map</button>
+
+          <span id="mapZoomLabel" class="map-zoom-label" aria-live="polite">Fit</span>
+        </div>
+
+        <p class="map-control-hint">
+          Scroll or trackpad to zoom · drag the map to pan · arrow keys pan when the map is focused
+        </p>
+      </div>
+
       <div class="map-frame">
         <svg
           id="mapSvg"
           class="map-svg"
           viewBox="0 0 1000 700"
           role="img"
+          tabindex="0"
           aria-labelledby="mapTitle mapDescription"
         >
           <title id="mapTitle">Minecraft coordinate waypoint map</title>
           <desc id="mapDescription">
             Locations are positioned proportionally using X horizontally and Z vertically.
+            Use the mouse wheel or trackpad to zoom, drag the map to pan, or use the map controls.
           </desc>
           <g id="gridLayer"></g>
           <g id="chunkLayer"></g>

@@ -266,6 +266,62 @@ h2 {
   font-weight: 700;
 }
 
+
+.map-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px 18px;
+  margin-bottom: 10px;
+}
+
+.map-controls {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.map-control-button {
+  min-width: 44px;
+  min-height: 44px;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--panel-soft);
+  color: var(--text);
+  font-size: 1.05rem;
+  font-weight: 850;
+  line-height: 1;
+}
+
+.map-control-button:disabled {
+  cursor: default;
+  opacity: 0.42;
+}
+
+.map-fit-button {
+  min-width: auto;
+  padding-inline: 14px;
+  font-size: 0.84rem;
+}
+
+.map-zoom-label {
+  min-width: 58px;
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 800;
+  text-align: center;
+}
+
+.map-control-hint {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.78rem;
+  line-height: 1.4;
+  text-align: right;
+}
+
 .map-frame {
   overflow: hidden;
   width: 100%;
@@ -276,12 +332,18 @@ h2 {
 
 .map-svg {
   display: block;
+  cursor: grab;
+  user-select: none;
   width: 100%;
   height: auto;
   aspect-ratio: 10 / 7;
   min-height: 330px;
   max-height: 680px;
   background: var(--map-bg);
+}
+
+.map-svg.is-panning {
+  cursor: grabbing;
 }
 
 .grid-line-minor {
@@ -518,7 +580,8 @@ h2 {
   }
 
   .secondary-button:hover,
-  .location-action:hover {
+  .location-action:hover,
+  .map-control-button:not(:disabled):hover {
     border-color: var(--accent);
   }
 
@@ -562,6 +625,15 @@ h2 {
 
   .map-key {
     justify-content: flex-start;
+  }
+
+  .map-toolbar {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .map-control-hint {
+    text-align: left;
   }
 
   .search-wrap {
