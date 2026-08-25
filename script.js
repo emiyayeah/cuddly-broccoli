@@ -4,13 +4,15 @@
  * X controls horizontal map position.
  * Z controls vertical map position.
  * Y is stored and displayed for reference only.
+ *
+ * Version 2:
+ * Locations now come from the shared Supabase database instead of
+ * localStorage, so everyone using the site sees the same map.
  **********************************************************************/
 
 /**********************************************************************
  * 1) FIXED SETTINGS
  **********************************************************************/
-
-const STORAGE_KEY = "minecraftCoordinateMap.locations.v1";
 
 const MAP_WIDTH = 1000;
 const MAP_HEIGHT = 700;
@@ -25,10 +27,11 @@ const MIN_VISIBLE_SPAN_BLOCKS = 400;
  * 2) STATE
  **********************************************************************/
 
-let locations = loadLocations();
+let locations = [];
 let selectedLocationId = null;
 let editingLocationId = null;
 let searchText = "";
+let databaseReady = false;
 
 /**********************************************************************
  * 3) DOM REFERENCES
@@ -58,55 +61,8 @@ const locationCount = document.getElementById("locationCount");
 const noSearchResults = document.getElementById("noSearchResults");
 
 /**********************************************************************
- * 4) STORAGE HELPERS
+ * 4) GENERAL HELPERS
  **********************************************************************/
-
-function loadLocations() {
-  try {
-    const saved = localStorage.getItem(STORAGE_KEY);
-    if (!saved) return [];
-
-    const parsed = JSON.parse(saved);
-    if (!Array.isArray(parsed)) return [];
-
-    return parsed.filter(isValidStoredLocation);
-  } catch (error) {
-    console.warn("Could not load saved locations:", error);
-    return [];
-  }
-}
-
-function saveLocations() {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(locations));
-  } catch (error) {
-    console.warn("Could not save locations:", error);
-    setFormMessage("This browser could not save your locations.", true);
-  }
-}
-
-function isValidStoredLocation(location) {
-  return (
-    location &&
-    typeof location.id === "string" &&
-    typeof location.name === "string" &&
-    Number.isFinite(Number(location.x)) &&
-    Number.isFinite(Number(location.y)) &&
-    Number.isFinite(Number(location.z))
-  );
-}
-
-/**********************************************************************
- * 5) GENERAL HELPERS
- **********************************************************************/
-
-function createId() {
-  if (window.crypto && typeof window.crypto.randomUUID === "function") {
-    return window.crypto.randomUUID();
-  }
-
-  return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
-}
 
 function escapeHtml(value) {
   return String(value)
@@ -134,12 +90,69 @@ function getLocationById(id) {
   return locations.find((location) => location.id === id) || null;
 }
 
+function explainDatabaseError(error, action) {
+  console.error(`Supabase error while trying to ${action}:`, error);
+
+  if (error && error.message) {
+    return `Could not ${action}. ${error.message}`;
+  }
+
+  return `Could not ${action}. Please refresh the page and try again.`;
+}
+
+/**********************************************************************
+ * 5) LOAD THE SHARED MAP
+ **********************************************************************/
+
+async function loadSharedMap() {
+  saveLocationBtn.disabled = true;
+  mapStatus.textContent = "Loading shared locations...";
+  locationCount.textContent = "Loading...";
+  setFormMessage("Connecting to the shared Realm map...");
+
+  try {
+    if (!window.realmDatabase) {
+      throw new Error("Database connection file did not load.");
+    }
+
+    locations = await window.realmDatabase.getLocations();
+    databaseReady = true;
+
+    // If a selected or edited location disappeared since our last refresh,
+    // safely clear that state.
+    if (selectedLocationId && !getLocationById(selectedLocationId)) {
+      selectedLocationId = null;
+    }
+
+    if (editingLocationId && !getLocationById(editingLocationId)) {
+      cancelEditing();
+    }
+
+    renderAll();
+    setFormMessage("Shared map connected.");
+  } catch (error) {
+    databaseReady = false;
+    locations = [];
+    renderAll();
+    mapStatus.textContent = "Could not load the shared map.";
+    locationCount.textContent = "Connection error";
+    setFormMessage(explainDatabaseError(error, "load the shared map"), true);
+  } finally {
+    saveLocationBtn.disabled = !databaseReady;
+  }
+}
+
 /**********************************************************************
  * 6) FORM: ADD / EDIT LOCATIONS
  **********************************************************************/
 
-locationForm.addEventListener("submit", (event) => {
+locationForm.addEventListener("submit", async (event) => {
   event.preventDefault();
+
+  if (!databaseReady) {
+    setFormMessage("The shared database is not connected yet.", true);
+    return;
+  }
 
   const name = locationNameInput.value.trim();
   const x = Number(xCoordInput.value);
@@ -166,44 +179,65 @@ locationForm.addEventListener("submit", (event) => {
     return;
   }
 
-  if (editingLocationId) {
-    const existing = getLocationById(editingLocationId);
-    if (!existing) {
-      cancelEditing();
-      setFormMessage("That location no longer exists.", true);
-      return;
+  saveLocationBtn.disabled = true;
+  cancelEditBtn.disabled = true;
+
+  try {
+    if (editingLocationId) {
+      const existing = getLocationById(editingLocationId);
+
+      if (!existing) {
+        cancelEditing();
+        setFormMessage("That location no longer exists.", true);
+        return;
+      }
+
+      const updatedLocation = await window.realmDatabase.updateLocation(
+        editingLocationId,
+        { name, x, y, z, notes }
+      );
+
+      const index = locations.findIndex(
+        (location) => location.id === editingLocationId
+      );
+
+      if (index !== -1) {
+        locations[index] = updatedLocation;
+      }
+
+      selectedLocationId = updatedLocation.id;
+      cancelEditing(false);
+      setFormMessage(`Updated ${name}.`);
+    } else {
+      const newLocation = await window.realmDatabase.addLocation({
+        name,
+        x,
+        y,
+        z,
+        notes,
+      });
+
+      locations.push(newLocation);
+      selectedLocationId = newLocation.id;
+
+      locationForm.reset();
+      setFormMessage(`Added ${name} to the shared map.`);
+      locationNameInput.focus();
     }
 
-    existing.name = name;
-    existing.x = x;
-    existing.y = y;
-    existing.z = z;
-    existing.notes = notes;
-
-    selectedLocationId = existing.id;
-    saveLocations();
-    cancelEditing(false);
-    setFormMessage(`Updated ${name}.`);
-  } else {
-    const newLocation = {
-      id: createId(),
-      name,
-      x,
-      y,
-      z,
-      notes,
-      createdAt: new Date().toISOString(),
-    };
-
-    locations.push(newLocation);
-    selectedLocationId = newLocation.id;
-    saveLocations();
-    locationForm.reset();
-    setFormMessage(`Added ${name}.`);
-    locationNameInput.focus();
+    renderAll();
+  } catch (error) {
+    setFormMessage(
+      explainDatabaseError(
+        error,
+        editingLocationId ? "update this location" : "add this location"
+      ),
+      true
+    );
+  } finally {
+    saveLocationBtn.disabled = false;
+    cancelEditBtn.disabled = false;
   }
-
-  renderAll();
 });
 
 cancelEditBtn.addEventListener("click", () => {
@@ -245,26 +279,31 @@ function cancelEditing(clearForm = true) {
   }
 }
 
-function deleteLocation(id) {
+async function deleteLocation(id) {
   const location = getLocationById(id);
   if (!location) return;
 
-  const shouldDelete = window.confirm(`Delete “${location.name}”?`);
+  const shouldDelete = window.confirm(`Delete “${location.name}” from the shared map?`);
   if (!shouldDelete) return;
 
-  locations = locations.filter((item) => item.id !== id);
+  try {
+    await window.realmDatabase.deleteLocation(id);
 
-  if (selectedLocationId === id) {
-    selectedLocationId = null;
+    locations = locations.filter((item) => item.id !== id);
+
+    if (selectedLocationId === id) {
+      selectedLocationId = null;
+    }
+
+    if (editingLocationId === id) {
+      cancelEditing();
+    }
+
+    setFormMessage(`Deleted ${location.name} from the shared map.`);
+    renderAll();
+  } catch (error) {
+    setFormMessage(explainDatabaseError(error, "delete this location"), true);
   }
-
-  if (editingLocationId === id) {
-    cancelEditing();
-  }
-
-  saveLocations();
-  setFormMessage(`Deleted ${location.name}.`);
-  renderAll();
 }
 
 /**********************************************************************
@@ -280,7 +319,9 @@ function getFilteredLocations() {
   if (!searchText) return locations;
 
   return locations.filter((location) => {
-    const searchable = `${location.name} ${location.notes || ""} ${location.x} ${location.y} ${location.z}`.toLowerCase();
+    const searchable =
+      `${location.name} ${location.notes || ""} ${location.x} ${location.y} ${location.z}`.toLowerCase();
+
     return searchable.includes(searchText);
   });
 }
@@ -290,7 +331,8 @@ function renderLocationList() {
 
   const filteredLocations = getFilteredLocations();
 
-  locationCount.textContent = `${locations.length} saved ${locations.length === 1 ? "location" : "locations"}`;
+  locationCount.textContent = `${locations.length} shared ${locations.length === 1 ? "location" : "locations"}`;
+
   noSearchResults.classList.toggle(
     "hidden",
     !(locations.length > 0 && filteredLocations.length === 0)
@@ -299,7 +341,9 @@ function renderLocationList() {
   if (locations.length === 0) {
     const message = document.createElement("p");
     message.className = "empty-list-message";
-    message.textContent = "Nothing here yet. Add your first waypoint above.";
+    message.textContent = databaseReady
+      ? "Nothing here yet. Add your first shared waypoint above."
+      : "Waiting for the shared map to connect.";
     locationsList.appendChild(message);
     return;
   }
@@ -366,10 +410,10 @@ function getMapTransform() {
   const xs = locations.map((location) => Number(location.x));
   const zs = locations.map((location) => Number(location.z));
 
-  let minX = Math.min(...xs);
-  let maxX = Math.max(...xs);
-  let minZ = Math.min(...zs);
-  let maxZ = Math.max(...zs);
+  const minX = Math.min(...xs);
+  const maxX = Math.max(...xs);
+  const minZ = Math.min(...zs);
+  const maxZ = Math.max(...zs);
 
   let spanX = Math.max(maxX - minX, MIN_VISIBLE_SPAN_BLOCKS);
   let spanZ = Math.max(maxZ - minZ, MIN_VISIBLE_SPAN_BLOCKS * 0.7);
@@ -420,6 +464,7 @@ function chooseGridStep(visibleSpanBlocks) {
   const normalized = target / magnitude;
 
   let nice;
+
   if (normalized <= 1) nice = 1;
   else if (normalized <= 2) nice = 2;
   else if (normalized <= 5) nice = 5;
@@ -440,7 +485,9 @@ function renderMap() {
   emptyLayer.classList.toggle("hidden", hasLocations);
 
   if (!hasLocations) {
-    mapStatus.textContent = "Add your first location to start the map.";
+    mapStatus.textContent = databaseReady
+      ? "Add your first location to start the shared map."
+      : "Loading shared locations...";
     selectedLocationCard.classList.add("hidden");
     return;
   }
@@ -455,7 +502,10 @@ function renderMap() {
   drawMarkers(transform);
 
   const blocksPer100Pixels = Math.round(transform.blocksPerPixel * 100);
-  mapStatus.textContent = `${locations.length} ${locations.length === 1 ? "location" : "locations"} · about ${formatNumber(blocksPer100Pixels)} blocks per 100 screen pixels`;
+
+  mapStatus.textContent =
+    `${locations.length} ${locations.length === 1 ? "location" : "locations"} · ` +
+    `about ${formatNumber(blocksPer100Pixels)} blocks per 100 screen pixels`;
 
   renderSelectedLocation();
 }
@@ -463,14 +513,21 @@ function renderMap() {
 function drawGrid(transform, minorStep, majorStep) {
   const ns = "http://www.w3.org/2000/svg";
 
-  const firstX = Math.floor(transform.visibleMinX / minorStep) * minorStep;
-  const firstZ = Math.floor(transform.visibleMinZ / minorStep) * minorStep;
+  const firstX =
+    Math.floor(transform.visibleMinX / minorStep) * minorStep;
+  const firstZ =
+    Math.floor(transform.visibleMinZ / minorStep) * minorStep;
 
   const maxGridLines = 150;
   let lineCount = 0;
 
-  for (let x = firstX; x <= transform.visibleMaxX && lineCount < maxGridLines; x += minorStep) {
+  for (
+    let x = firstX;
+    x <= transform.visibleMaxX && lineCount < maxGridLines;
+    x += minorStep
+  ) {
     lineCount += 1;
+
     const screenX = mapXToScreen(x, transform);
     if (screenX < 0 || screenX > MAP_WIDTH) continue;
 
@@ -482,7 +539,14 @@ function drawGrid(transform, minorStep, majorStep) {
     line.setAttribute("x2", screenX);
     line.setAttribute("y1", 0);
     line.setAttribute("y2", MAP_HEIGHT);
-    line.setAttribute("class", isAxis ? "axis-line" : isMajor ? "grid-line-major" : "grid-line-minor");
+    line.setAttribute(
+      "class",
+      isAxis
+        ? "axis-line"
+        : isMajor
+          ? "grid-line-major"
+          : "grid-line-minor"
+    );
     gridLayer.appendChild(line);
 
     if (isMajor && screenX > 36 && screenX < MAP_WIDTH - 36) {
@@ -497,8 +561,13 @@ function drawGrid(transform, minorStep, majorStep) {
 
   lineCount = 0;
 
-  for (let z = firstZ; z <= transform.visibleMaxZ && lineCount < maxGridLines; z += minorStep) {
+  for (
+    let z = firstZ;
+    z <= transform.visibleMaxZ && lineCount < maxGridLines;
+    z += minorStep
+  ) {
     lineCount += 1;
+
     const screenY = mapZToScreen(z, transform);
     if (screenY < 0 || screenY > MAP_HEIGHT) continue;
 
@@ -510,7 +579,14 @@ function drawGrid(transform, minorStep, majorStep) {
     line.setAttribute("x2", MAP_WIDTH);
     line.setAttribute("y1", screenY);
     line.setAttribute("y2", screenY);
-    line.setAttribute("class", isAxis ? "axis-line" : isMajor ? "grid-line-major" : "grid-line-minor");
+    line.setAttribute(
+      "class",
+      isAxis
+        ? "axis-line"
+        : isMajor
+          ? "grid-line-major"
+          : "grid-line-minor"
+    );
     gridLayer.appendChild(line);
 
     if (isMajor && screenY > 28 && screenY < MAP_HEIGHT - 20) {
@@ -531,8 +607,15 @@ function isMultipleOf(value, step) {
 
 function formatCompactNumber(value) {
   const absolute = Math.abs(value);
-  if (absolute >= 1000000) return `${trimDecimal(value / 1000000)}m`;
-  if (absolute >= 1000) return `${trimDecimal(value / 1000)}k`;
+
+  if (absolute >= 1000000) {
+    return `${trimDecimal(value / 1000000)}m`;
+  }
+
+  if (absolute >= 1000) {
+    return `${trimDecimal(value / 1000)}k`;
+  }
+
   return formatNumber(Math.round(value));
 }
 
@@ -552,7 +635,10 @@ function drawMarkers(transform) {
     group.classList.toggle("selected", selectedLocationId === location.id);
     group.setAttribute("role", "button");
     group.setAttribute("tabindex", "0");
-    group.setAttribute("aria-label", `${location.name}, ${formatCoordinates(location)}`);
+    group.setAttribute(
+      "aria-label",
+      `${location.name}, ${formatCoordinates(location)}`
+    );
 
     const halo = document.createElementNS(ns, "circle");
     halo.setAttribute("cx", x);
@@ -566,10 +652,20 @@ function drawMarkers(transform) {
     dot.setAttribute("r", 8);
     dot.setAttribute("class", "marker-dot");
 
-    const labelText = location.name.length > 30 ? `${location.name.slice(0, 28)}…` : location.name;
+    const labelText =
+      location.name.length > 30
+        ? `${location.name.slice(0, 28)}…`
+        : location.name;
+
     const estimatedWidth = Math.max(56, labelText.length * 7.5 + 18);
-    const labelX = Math.min(Math.max(x + 14, 5), MAP_WIDTH - estimatedWidth - 5);
-    const labelY = Math.min(Math.max(y - 27, 22), MAP_HEIGHT - 10);
+    const labelX = Math.min(
+      Math.max(x + 14, 5),
+      MAP_WIDTH - estimatedWidth - 5
+    );
+    const labelY = Math.min(
+      Math.max(y - 27, 22),
+      MAP_HEIGHT - 10
+    );
 
     const labelBg = document.createElementNS(ns, "rect");
     labelBg.setAttribute("x", labelX);
@@ -587,7 +683,10 @@ function drawMarkers(transform) {
 
     group.append(halo, dot, labelBg, label);
 
-    group.addEventListener("click", () => selectLocation(location.id));
+    group.addEventListener("click", () => {
+      selectLocation(location.id);
+    });
+
     group.addEventListener("keydown", (event) => {
       if (event.key === "Enter" || event.key === " ") {
         event.preventDefault();
@@ -605,6 +704,7 @@ function drawMarkers(transform) {
 
 function selectLocation(id) {
   if (!getLocationById(id)) return;
+
   selectedLocationId = id;
   renderMap();
   renderLocationList();
@@ -629,9 +729,11 @@ function renderSelectedLocation() {
     <button id="selectedEditBtn" class="location-action" type="button">Edit</button>
   `;
 
-  document.getElementById("selectedEditBtn").addEventListener("click", () => {
-    beginEditing(location.id);
-  });
+  document
+    .getElementById("selectedEditBtn")
+    .addEventListener("click", () => {
+      beginEditing(location.id);
+    });
 }
 
 /**********************************************************************
@@ -643,4 +745,9 @@ function renderAll() {
   renderLocationList();
 }
 
+/**********************************************************************
+ * 12) START THE APP
+ **********************************************************************/
+
 renderAll();
+loadSharedMap();
