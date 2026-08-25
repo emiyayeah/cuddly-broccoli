@@ -573,6 +573,11 @@ function initializeWorldControls() {
   populateDimensionSelect(dimensionSelect);
   populateDimensionSelect(locationDimensionSelect);
 
+  if (!isBiomeFeatureEnabled()) {
+  biomeToggleBtn.classList.add("hidden");
+  biomeEditorCard.classList.add("hidden");
+}
+
   const configuredDefault = getWorldConfig().defaultDimension;
   const enabledIds = getEnabledDimensions().map(
     (dimension) => dimension.id
@@ -1864,6 +1869,10 @@ function updateBiomeColorPreview() {
 }
 
 function setBiomeOverlayEnabled(enabled) {
+  if (!isBiomeFeatureEnabled()) {
+    biomeOverlayEnabled = false;
+    return;
+  }
   biomeOverlayEnabled = Boolean(enabled);
 
   biomeToggleBtn.classList.toggle(
@@ -2336,6 +2345,7 @@ mapSvg.addEventListener("pointercancel", finishMapPan);
 
 mapSvg.addEventListener("click", (event) => {
   if (
+    !isBiomeFeatureEnabled() ||
     !biomeOverlayEnabled ||
     !biomeDatabaseReady ||
     Date.now() < suppressMapClickUntil
