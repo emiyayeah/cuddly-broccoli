@@ -1,24 +1,23 @@
 /**********************************************************************
  * SUPABASE / SHARED DATABASE
  * --------------------------------------------------------------------
- * This file contains only the shared-database connection and the four
- * operations our map needs:
+ * Browser-safe shared database operations for:
  *
- * - get all locations
- * - add a location
- * - update a location
- * - delete a location
+ * LOCATIONS
+ * - dimension-aware
+ * - optionally scoped to one vertical map layer
  *
- * The publishable key below is intentionally browser-safe. Never put a
- * Supabase secret key or service_role key in this file.
+ * CHUNK BIOMES
+ * - dimension + map-layer aware
+ *
+ * The publishable key below is intentionally browser-safe.
+ * NEVER put a Supabase secret key or service_role key in this file.
  **********************************************************************/
 
 /**********************************************************************
  * 1) PROJECT CONNECTION
  **********************************************************************/
 
-// Use the PROJECT URL, not the REST endpoint.
-// In other words: no "/rest/v1/" on the end.
 const SUPABASE_URL = "https://pcfsvukjcuaeufbfnkbk.supabase.co";
 
 const SUPABASE_PUBLISHABLE_KEY =
@@ -38,7 +37,7 @@ const supabaseClient = window.supabase.createClient(
 );
 
 /**********************************************************************
- * 3) SMALL DATA HELPER
+ * 3) NORMALIZE DATABASE ROWS
  **********************************************************************/
 
 function normalizeLocation(row) {
@@ -49,18 +48,38 @@ function normalizeLocation(row) {
     y: row.y === null ? null : Number(row.y),
     z: Number(row.z),
     notes: row.notes || "",
+    dimension: row.dimension || "overworld",
+
+    // null means: show this waypoint on every map layer in the dimension.
+    mapLayer: row.map_layer || null,
+
     createdAt: row.created_at || null,
   };
 }
 
+function normalizeChunkBiome(row) {
+  return {
+    dimension: row.dimension,
+    mapLayer: row.map_layer,
+    chunkX: Number(row.chunk_x),
+    chunkZ: Number(row.chunk_z),
+    biomeId: row.biome_id,
+    notes: row.notes || "",
+    createdAt: row.created_at || null,
+    updatedAt: row.updated_at || null,
+  };
+}
+
 /**********************************************************************
- * 4) DATABASE OPERATIONS
+ * 4) LOCATION DATABASE OPERATIONS
  **********************************************************************/
 
 async function getSharedLocations() {
   const { data, error } = await supabaseClient
     .from("locations")
-    .select("id, name, x, y, z, notes, created_at")
+    .select(
+      "id, name, x, y, z, notes, dimension, map_layer, created_at"
+    )
     .order("created_at", { ascending: true });
 
   if (error) {
@@ -79,8 +98,12 @@ async function addSharedLocation(location) {
       y: location.y,
       z: location.z,
       notes: location.notes || "",
+      dimension: location.dimension,
+      map_layer: location.mapLayer || null,
     })
-    .select("id, name, x, y, z, notes, created_at")
+    .select(
+      "id, name, x, y, z, notes, dimension, map_layer, created_at"
+    )
     .single();
 
   if (error) {
@@ -99,9 +122,13 @@ async function updateSharedLocation(id, location) {
       y: location.y,
       z: location.z,
       notes: location.notes || "",
+      dimension: location.dimension,
+      map_layer: location.mapLayer || null,
     })
     .eq("id", id)
-    .select("id, name, x, y, z, notes, created_at")
+    .select(
+      "id, name, x, y, z, notes, dimension, map_layer, created_at"
+    )
     .single();
 
   if (error) {
@@ -123,7 +150,79 @@ async function deleteSharedLocation(id) {
 }
 
 /**********************************************************************
- * 5) EXPOSE A TINY DATABASE API TO script.js
+ * 5) CHUNK BIOME DATABASE OPERATIONS
+ **********************************************************************/
+
+async function getSharedChunkBiomes() {
+  const { data, error } = await supabaseClient
+    .from("chunk_biomes")
+    .select(
+      "dimension, map_layer, chunk_x, chunk_z, biome_id, notes, created_at, updated_at"
+    )
+    .order("dimension", { ascending: true })
+    .order("map_layer", { ascending: true })
+    .order("chunk_z", { ascending: true })
+    .order("chunk_x", { ascending: true });
+
+  if (error) {
+    throw error;
+  }
+
+  return (data || []).map(normalizeChunkBiome);
+}
+
+async function saveSharedChunkBiome(chunkBiome) {
+  const now = new Date().toISOString();
+
+  const { data, error } = await supabaseClient
+    .from("chunk_biomes")
+    .upsert(
+      {
+        dimension: chunkBiome.dimension,
+        map_layer: chunkBiome.mapLayer,
+        chunk_x: chunkBiome.chunkX,
+        chunk_z: chunkBiome.chunkZ,
+        biome_id: chunkBiome.biomeId,
+        notes: chunkBiome.notes || "",
+        updated_at: now,
+      },
+      {
+        onConflict: "dimension,map_layer,chunk_x,chunk_z",
+      }
+    )
+    .select(
+      "dimension, map_layer, chunk_x, chunk_z, biome_id, notes, created_at, updated_at"
+    )
+    .single();
+
+  if (error) {
+    throw error;
+  }
+
+  return normalizeChunkBiome(data);
+}
+
+async function deleteSharedChunkBiome(
+  dimension,
+  mapLayer,
+  chunkX,
+  chunkZ
+) {
+  const { error } = await supabaseClient
+    .from("chunk_biomes")
+    .delete()
+    .eq("dimension", dimension)
+    .eq("map_layer", mapLayer)
+    .eq("chunk_x", chunkX)
+    .eq("chunk_z", chunkZ);
+
+  if (error) {
+    throw error;
+  }
+}
+
+/**********************************************************************
+ * 6) EXPOSE A SMALL DATABASE API TO script.js
  **********************************************************************/
 
 window.realmDatabase = {
@@ -131,4 +230,8 @@ window.realmDatabase = {
   addLocation: addSharedLocation,
   updateLocation: updateSharedLocation,
   deleteLocation: deleteSharedLocation,
+
+  getChunkBiomes: getSharedChunkBiomes,
+  saveChunkBiome: saveSharedChunkBiome,
+  deleteChunkBiome: deleteSharedChunkBiome,
 };

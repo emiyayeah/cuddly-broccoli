@@ -20,7 +20,7 @@
       </div>
     </header>
 
-    <section class="entry-panel" aria-labelledby="location-form-heading">
+    <section class="entry-panel" aria-label="Add a location">
       <div class="section-heading-row">
       </div>
 
@@ -50,6 +50,20 @@
           <div class="field">
             <label for="zCoord">Z</label>
             <input id="zCoord" name="zCoord" type="number" step="1" inputmode="numeric" placeholder="0" required />
+          </div>
+        </div>
+
+        <div class="location-context-fields">
+          <div class="field">
+            <label for="locationDimension">Dimension</label>
+            <select id="locationDimension" name="locationDimension"></select>
+          </div>
+
+          <div class="field">
+            <label for="locationLayer">Show on map layer</label>
+            <select id="locationLayer" name="locationLayer">
+              <option value="">All layers</option>
+            </select>
           </div>
         </div>
 
@@ -88,6 +102,20 @@
         </div>
       </div>
 
+      <div class="world-context-bar" aria-label="Current map">
+        <div class="field world-context-field">
+          <label for="dimensionSelect">Dimension</label>
+          <select id="dimensionSelect"></select>
+        </div>
+
+        <div class="field world-context-field">
+          <label for="mapLayerSelect">Map layer</label>
+          <select id="mapLayerSelect"></select>
+        </div>
+
+        <p id="worldContextDescription" class="world-context-description"></p>
+      </div>
+
       <div class="map-toolbar">
         <div class="map-controls" aria-label="Map zoom controls">
           <button
@@ -112,6 +140,15 @@
             type="button"
           >Fit map</button>
 
+          <button
+            id="biomeToggleBtn"
+            class="map-control-button biome-toggle-button"
+            disabled
+            type="button"
+            aria-pressed="false"
+            title="Show or hide assigned biome colors"
+          >Biomes off</button>
+
           <span id="mapZoomLabel" class="map-zoom-label" aria-live="polite">Fit</span>
         </div>
 
@@ -121,6 +158,8 @@
       </div>
 
       <div class="map-frame">
+        <div id="biomeTooltip" class="biome-tooltip hidden" role="tooltip"></div>
+
         <svg
           id="mapSvg"
           class="map-svg"
@@ -134,8 +173,10 @@
             locations are positioned proportionally using X horizontally and Z vertically.
             use the mouse wheel or trackpad to zoom, drag the map to pan, or use the map controls.
           </desc>
+          <g id="biomeLayer"></g>
           <g id="gridLayer"></g>
           <g id="chunkLayer"></g>
+          <g id="biomeSelectionLayer"></g>
           <g id="markerLayer"></g>
           <g id="emptyLayer">
             <text x="500" y="335" class="empty-map-title" text-anchor="middle">No locations yet</text>
@@ -145,6 +186,51 @@
       </div>
 
       <div id="selectedLocationCard" class="selected-card hidden" aria-live="polite"></div>
+
+      <div id="biomeEditorCard" class="biome-editor-card hidden">
+        <div class="biome-editor-heading">
+          <div>
+            <p id="biomeContextLabel" class="biome-editor-kicker">selected chunk</p>
+            <p id="biomeChunkCoords" class="biome-chunk-coords"></p>
+          </div>
+
+          <div class="biome-current-wrap">
+            <span id="biomeCurrentSwatch" class="biome-current-swatch" aria-hidden="true"></span>
+            <span id="biomeCurrentBadge" class="biome-current-badge">unassigned</span>
+          </div>
+        </div>
+
+        <form id="biomeForm" class="biome-form">
+          <div class="field biome-select-field">
+            <label for="biomeSelect">Biome</label>
+            <div class="biome-select-row">
+              <select id="biomeSelect" name="biomeSelect" required>
+                <option value="">Choose biome...</option>
+              </select>
+              <span id="biomeColorPreview" class="biome-color-preview" aria-hidden="true"></span>
+            </div>
+          </div>
+
+          <div class="field biome-notes-field">
+            <label for="biomeNotes">Notes <span class="optional">optional</span></label>
+            <input
+              id="biomeNotes"
+              name="biomeNotes"
+              type="text"
+              maxlength="200"
+              placeholder="observed majority, landmark, edge nearby..."
+              autocomplete="off"
+            />
+          </div>
+
+          <div class="form-actions biome-form-actions">
+            <button id="saveBiomeBtn" class="primary-button" type="submit">save biome</button>
+            <button id="clearBiomeBtn" class="secondary-button hidden" type="button">clear biome</button>
+          </div>
+
+          <p id="biomeFormMessage" class="form-message biome-form-message" role="status" aria-live="polite"></p>
+        </form>
+      </div>
     </section>
 
     <section class="locations-section" aria-labelledby="locations-heading">
@@ -173,6 +259,12 @@
 
   <!-- Supabase's browser library -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+  <!-- Dimensions + vertical map layers. -->
+  <script src="world-config.js"></script>
+
+  <!-- Biome names + colors. Edit this file to customize the biome palette. -->
+  <script src="biomes.js"></script>
 
   <!-- Our database connection code -->
   <script src="supabase.js"></script>

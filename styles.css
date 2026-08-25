@@ -17,6 +17,9 @@
   --chunk-border: #96a991;
   --chunk-highlight: rgba(176, 118, 45, 0.12);
   --chunk-highlight-border: #b0762d;
+  --biome-selection: #4777a8;
+  --biome-tooltip-bg: rgba(23, 32, 25, 0.94);
+  --biome-tooltip-text: #ffffff;
   --marker: #315c3b;
   --marker-selected: #b0762d;
   --map-bg: #fbfcfa;
@@ -42,6 +45,9 @@
     --chunk-border: #617563;
     --chunk-highlight: rgba(239, 181, 96, 0.12);
     --chunk-highlight-border: #efb560;
+    --biome-selection: #8bb8e7;
+    --biome-tooltip-bg: rgba(237, 243, 237, 0.96);
+    --biome-tooltip-text: #172019;
     --marker: #92c79a;
     --marker-selected: #efb560;
     --map-bg: #171d18;
@@ -66,7 +72,8 @@ body {
 }
 
 button,
-input {
+input,
+select {
   font: inherit;
 }
 
@@ -76,6 +83,7 @@ button {
 
 button:focus-visible,
 input:focus-visible,
+select:focus-visible,
 .marker-button:focus-visible {
   outline: 3px solid color-mix(in srgb, var(--accent) 55%, transparent);
   outline-offset: 2px;
@@ -178,6 +186,7 @@ h2 {
 }
 
 .field input,
+.field select,
 .search-wrap input {
   width: 100%;
   min-height: 46px;
@@ -193,6 +202,13 @@ h2 {
 .search-wrap input::placeholder {
   color: var(--muted);
   opacity: 0.72;
+}
+
+.location-context-fields {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
 }
 
 .coordinate-fields {
@@ -267,6 +283,33 @@ h2 {
 }
 
 
+.world-context-bar {
+  display: flex;
+  align-items: end;
+  gap: 10px 14px;
+  margin-bottom: 12px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--panel-soft);
+}
+
+.world-context-field {
+  flex: 0 1 220px;
+}
+
+.world-context-field select {
+  min-width: 150px;
+}
+
+.world-context-description {
+  flex: 1 1 280px;
+  margin: 0 0 4px;
+  color: var(--muted);
+  font-size: 0.8rem;
+  line-height: 1.4;
+}
+
 .map-toolbar {
   display: flex;
   align-items: center;
@@ -306,6 +349,18 @@ h2 {
   font-size: 0.84rem;
 }
 
+.biome-toggle-button {
+  min-width: auto;
+  padding-inline: 14px;
+  font-size: 0.84rem;
+}
+
+.biome-toggle-button.is-active {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+}
+
 .map-zoom-label {
   min-width: 58px;
   color: var(--muted);
@@ -323,6 +378,7 @@ h2 {
 }
 
 .map-frame {
+  position: relative;
   overflow: hidden;
   width: 100%;
   border: 1px solid var(--border);
@@ -387,6 +443,152 @@ h2 {
   stroke: var(--chunk-highlight-border);
   stroke-width: 2.5;
   vector-effect: non-scaling-stroke;
+  pointer-events: none;
+}
+
+.biome-chunk-fill {
+  fill-opacity: 0.34;
+  stroke: none;
+  pointer-events: none;
+}
+
+.biome-selected-chunk {
+  fill: transparent;
+  stroke: var(--biome-selection);
+  stroke-width: 3;
+  stroke-dasharray: 8 5;
+  vector-effect: non-scaling-stroke;
+  pointer-events: none;
+}
+
+.biome-tooltip {
+  position: absolute;
+  z-index: 5;
+  max-width: min(260px, calc(100% - 24px));
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--biome-tooltip-bg);
+  color: var(--biome-tooltip-text);
+  font-size: 0.78rem;
+  line-height: 1.35;
+  pointer-events: none;
+  box-shadow: 0 5px 18px rgba(0, 0, 0, 0.18);
+}
+
+.biome-tooltip-name {
+  display: block;
+  font-weight: 850;
+}
+
+.biome-tooltip-meta {
+  display: block;
+  margin-top: 2px;
+  opacity: 0.82;
+}
+
+.biome-editor-card {
+  margin-top: 12px;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--panel-soft);
+}
+
+.biome-editor-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  margin-bottom: 12px;
+}
+
+.biome-editor-kicker {
+  margin-bottom: 3px;
+  color: var(--muted);
+  font-size: 0.7rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.biome-chunk-coords {
+  margin-bottom: 0;
+  font-size: 0.9rem;
+  font-weight: 800;
+  white-space: pre-line;
+}
+
+.biome-current-wrap {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+
+.biome-current-swatch,
+.biome-color-preview {
+  display: inline-block;
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: transparent;
+}
+
+.biome-current-badge {
+  color: var(--muted);
+  font-size: 0.8rem;
+  font-weight: 800;
+}
+
+.biome-form {
+  display: grid;
+  grid-template-columns: minmax(220px, 0.8fr) minmax(280px, 1.2fr);
+  gap: 12px 14px;
+  align-items: end;
+}
+
+.biome-select-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 28px;
+  gap: 8px;
+  align-items: center;
+}
+
+.biome-select-row select {
+  min-height: 46px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--panel-soft);
+  color: var(--text);
+  font-size: 1rem;
+}
+
+.biome-color-preview {
+  width: 28px;
+  height: 28px;
+  border-radius: 7px;
+}
+
+.biome-form-actions {
+  grid-column: 1 / -1;
+}
+
+.biome-form-message {
+  grid-column: 1 / -1;
+}
+
+.biome-form-message.error {
+  color: var(--danger);
+}
+
+.grid-line-minor,
+.grid-line-major,
+.axis-line,
+.chunk-grid-line,
+.grid-label {
   pointer-events: none;
 }
 
@@ -516,6 +718,15 @@ h2 {
   font-weight: 850;
 }
 
+.location-scope {
+  display: block;
+  margin-top: 2px;
+  color: var(--accent);
+  font-size: 0.76rem;
+  font-weight: 750;
+  line-height: 1.35;
+}
+
 .location-coords,
 .location-notes {
   display: block;
@@ -610,6 +821,28 @@ h2 {
 
   .location-form {
     grid-template-columns: 1fr;
+  }
+
+  .location-context-fields {
+    grid-template-columns: 1fr;
+  }
+
+  .world-context-bar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .world-context-field {
+    flex-basis: auto;
+    width: 100%;
+  }
+
+  .biome-form {
+    grid-template-columns: 1fr;
+  }
+
+  .biome-editor-heading {
+    flex-direction: column;
   }
 
   .field-notes,

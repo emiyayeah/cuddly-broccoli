@@ -5,10 +5,10 @@
  * Z controls vertical map position.
  * Y is stored and displayed for reference only.
  *
- * Version 4.3:
- * Shared Supabase storage, optional Y, Minecraft 16×16 chunk borders,
- * zoom/pan/Fit Map controls, multiline chunk details, and a chunk-aligned
- * coordinate reference grid so major lines never sit beside chunk borders.
+ * Version 6:
+ * Dimension-aware waypoints, vertical map layers, shared chunk biomes,
+ * optional Y, Minecraft 16×16 chunk borders, zoom/pan/Fit Map controls,
+ * color-coded biome overlays, chunk selection, and biome hover tooltips.
  **********************************************************************/
 
 /**********************************************************************
@@ -41,6 +41,7 @@ const MAX_MAP_SCALE = 12;
 const ZOOM_BUTTON_FACTOR = 1.4;
 const WHEEL_ZOOM_SPEED = 0.0015;
 const KEYBOARD_PAN_FRACTION = 0.12;
+const PAN_CLICK_THRESHOLD_PX = 6;
 
 /**********************************************************************
  * 2) STATE
@@ -51,6 +52,19 @@ let selectedLocationId = null;
 let editingLocationId = null;
 let searchText = "";
 let databaseReady = false;
+
+// Current world-map context.
+let selectedDimensionId = "overworld";
+let selectedMapLayerId = "surface";
+
+// Shared biome assignments. One record = one Minecraft chunk.
+let chunkBiomes = [];
+let biomeDatabaseReady = false;
+let biomeOverlayEnabled = false;
+let selectedBiomeChunk = null;
+
+// Used to prevent a completed drag from also being treated as a chunk click.
+let suppressMapClickUntil = 0;
 
 // Current map camera. These are Minecraft world coordinates plus a scale
 // measured in SVG map units per Minecraft block.
@@ -75,6 +89,10 @@ const xCoordInput = document.getElementById("xCoord");
 const yCoordInput = document.getElementById("yCoord");
 const zCoordInput = document.getElementById("zCoord");
 const locationNotesInput = document.getElementById("locationNotes");
+const locationDimensionSelect =
+  document.getElementById("locationDimension");
+const locationLayerSelect =
+  document.getElementById("locationLayer");
 
 const saveLocationBtn = document.getElementById("saveLocationBtn");
 const cancelEditBtn = document.getElementById("cancelEditBtn");
@@ -82,17 +100,39 @@ const formModeText = document.getElementById("formModeText");
 const formMessage = document.getElementById("formMessage");
 
 const mapStatus = document.getElementById("mapStatus");
+const dimensionSelect = document.getElementById("dimensionSelect");
+const mapLayerSelect = document.getElementById("mapLayerSelect");
+const worldContextDescription =
+  document.getElementById("worldContextDescription");
 const mapSvg = document.getElementById("mapSvg");
 const zoomOutBtn = document.getElementById("zoomOutBtn");
 const zoomInBtn = document.getElementById("zoomInBtn");
 const fitMapBtn = document.getElementById("fitMapBtn");
+const biomeToggleBtn = document.getElementById("biomeToggleBtn");
 const mapZoomLabel = document.getElementById("mapZoomLabel");
+const mapFrame = document.querySelector(".map-frame");
+const biomeTooltip = document.getElementById("biomeTooltip");
 
+const biomeLayer = document.getElementById("biomeLayer");
 const gridLayer = document.getElementById("gridLayer");
 const chunkLayer = document.getElementById("chunkLayer");
+const biomeSelectionLayer = document.getElementById("biomeSelectionLayer");
 const markerLayer = document.getElementById("markerLayer");
 const emptyLayer = document.getElementById("emptyLayer");
 const selectedLocationCard = document.getElementById("selectedLocationCard");
+
+const biomeEditorCard = document.getElementById("biomeEditorCard");
+const biomeContextLabel = document.getElementById("biomeContextLabel");
+const biomeChunkCoords = document.getElementById("biomeChunkCoords");
+const biomeCurrentSwatch = document.getElementById("biomeCurrentSwatch");
+const biomeCurrentBadge = document.getElementById("biomeCurrentBadge");
+const biomeForm = document.getElementById("biomeForm");
+const biomeSelect = document.getElementById("biomeSelect");
+const biomeColorPreview = document.getElementById("biomeColorPreview");
+const biomeNotes = document.getElementById("biomeNotes");
+const saveBiomeBtn = document.getElementById("saveBiomeBtn");
+const clearBiomeBtn = document.getElementById("clearBiomeBtn");
+const biomeFormMessage = document.getElementById("biomeFormMessage");
 
 const locationSearch = document.getElementById("locationSearch");
 const locationsList = document.getElementById("locationsList");
@@ -131,6 +171,216 @@ function getLocationById(id) {
   return locations.find((location) => location.id === id) || null;
 }
 
+function getWorldConfig() {
+  return window.WORLD_CONFIG || {
+    defaultDimension: "overworld",
+    dimensions: [
+      {
+        id: "overworld",
+        label: "Overworld",
+        enabled: true,
+        defaultLayer: "surface",
+        layers: [
+          { id: "surface", label: "Surface" },
+        ],
+      },
+    ],
+  };
+}
+
+function getEnabledDimensions() {
+  return getWorldConfig().dimensions.filter(
+    (dimension) => dimension.enabled !== false
+  );
+}
+
+function getDimensionDefinition(dimensionId) {
+  return (
+    getWorldConfig().dimensions.find(
+      (dimension) => dimension.id === dimensionId
+    ) || null
+  );
+}
+
+function getLayerDefinition(dimensionId, layerId) {
+  const dimension = getDimensionDefinition(dimensionId);
+
+  return (
+    dimension?.layers?.find(
+      (layer) => layer.id === layerId
+    ) || null
+  );
+}
+
+function getDefaultLayerId(dimensionId) {
+  const dimension = getDimensionDefinition(dimensionId);
+
+  return (
+    dimension?.defaultLayer ||
+    dimension?.layers?.[0]?.id ||
+    "surface"
+  );
+}
+
+function getDimensionLabel(dimensionId) {
+  return (
+    getDimensionDefinition(dimensionId)?.label ||
+    dimensionId
+  );
+}
+
+function getLayerLabel(dimensionId, layerId) {
+  return (
+    getLayerDefinition(dimensionId, layerId)?.label ||
+    layerId
+  );
+}
+
+function formatMapContext(
+  dimensionId = selectedDimensionId,
+  layerId = selectedMapLayerId
+) {
+  return (
+    `${getDimensionLabel(dimensionId)} · ` +
+    `${getLayerLabel(dimensionId, layerId)}`
+  );
+}
+
+function getVisibleLocations() {
+  return locations.filter(
+    (location) =>
+      location.dimension === selectedDimensionId &&
+      (
+        location.mapLayer === null ||
+        location.mapLayer === selectedMapLayerId
+      )
+  );
+}
+
+function getCurrentChunkBiomes() {
+  return chunkBiomes.filter(
+    (assignment) =>
+      assignment.dimension === selectedDimensionId &&
+      assignment.mapLayer === selectedMapLayerId
+  );
+}
+
+function hasMapContent() {
+  return (
+    getVisibleLocations().length > 0 ||
+    getCurrentChunkBiomes().length > 0
+  );
+}
+
+function getBiomeOptions() {
+  return Array.isArray(window.BIOME_OPTIONS)
+    ? window.BIOME_OPTIONS
+    : [];
+}
+
+function getBiomeOptionsForContext(
+  dimensionId = selectedDimensionId,
+  layerId = selectedMapLayerId
+) {
+  return getBiomeOptions().filter((biome) => {
+    const dimensionsOkay =
+      !Array.isArray(biome.dimensions) ||
+      biome.dimensions.includes(dimensionId);
+
+    const layersOkay =
+      !Array.isArray(biome.layers) ||
+      biome.layers.includes(layerId);
+
+    return dimensionsOkay && layersOkay;
+  });
+}
+
+function getBiomeDefinition(biomeId) {
+  return (
+    getBiomeOptions().find((biome) => biome.id === biomeId) || null
+  );
+}
+
+function getBiomeColor(biomeId) {
+  const definition = getBiomeDefinition(biomeId);
+  return definition?.color || "#8a8f8b";
+}
+
+function getBiomeLabel(biomeId) {
+  const definition = getBiomeDefinition(biomeId);
+  return definition?.label || biomeId || "Unknown biome";
+}
+
+function getChunkKey(
+  chunkX,
+  chunkZ,
+  dimensionId = selectedDimensionId,
+  layerId = selectedMapLayerId
+) {
+  return `${dimensionId}|${layerId}|${chunkX},${chunkZ}`;
+}
+
+function getChunkBiome(
+  chunkX,
+  chunkZ,
+  dimensionId = selectedDimensionId,
+  layerId = selectedMapLayerId
+) {
+  return (
+    chunkBiomes.find(
+      (assignment) =>
+        assignment.dimension === dimensionId &&
+        assignment.mapLayer === layerId &&
+        assignment.chunkX === chunkX &&
+        assignment.chunkZ === chunkZ
+    ) || null
+  );
+}
+
+function formatLocationScope(location) {
+  const dimensionLabel = getDimensionLabel(location.dimension);
+
+  if (location.mapLayer === null) {
+    return `${dimensionLabel} · all layers`;
+  }
+
+  return (
+    `${dimensionLabel} · ` +
+    getLayerLabel(location.dimension, location.mapLayer)
+  );
+}
+
+function getChunkInfoFromChunkCoords(chunkX, chunkZ) {
+  const minX = chunkX * CHUNK_SIZE;
+  const maxX = minX + CHUNK_SIZE - 1;
+  const minZ = chunkZ * CHUNK_SIZE;
+  const maxZ = minZ + CHUNK_SIZE - 1;
+
+  return {
+    chunkX,
+    chunkZ,
+    minX,
+    maxX,
+    minZ,
+    maxZ,
+  };
+}
+
+function formatChunkInfoFromChunkCoords(chunkX, chunkZ) {
+  const chunk = getChunkInfoFromChunkCoords(chunkX, chunkZ);
+
+  return (
+    `chunk coords ${formatNumber(chunk.chunkX)}, ${formatNumber(chunk.chunkZ)}\n` +
+    `X: ${formatNumber(chunk.minX)} to ${formatNumber(chunk.maxX)}\n` +
+    `Z: ${formatNumber(chunk.minZ)} to ${formatNumber(chunk.maxZ)}`
+  );
+}
+
+function setBiomeFormMessage(message, isError = false) {
+  biomeFormMessage.textContent = message;
+  biomeFormMessage.classList.toggle("error", isError);
+}
+
 function getChunkInfo(x, z) {
   // Math.floor is important here because Minecraft chunks extend through
   // negative coordinates too. Example: X -1 belongs to chunk -1, not chunk 0.
@@ -155,10 +405,9 @@ function getChunkInfo(x, z) {
 function formatChunkInfo(location) {
   const chunk = getChunkInfo(location.x, location.z);
 
-  return (
-    `chunk coords ${formatNumber(chunk.chunkX)}, ${formatNumber(chunk.chunkZ)}\n` +
-    `X: ${formatNumber(chunk.minX)} to ${formatNumber(chunk.maxX)}\n` +
-    `Z: ${formatNumber(chunk.minZ)} to ${formatNumber(chunk.maxZ)}`
+  return formatChunkInfoFromChunkCoords(
+    chunk.chunkX,
+    chunk.chunkZ
   );
 }
 
@@ -173,52 +422,286 @@ function explainDatabaseError(error, action) {
 }
 
 /**********************************************************************
- * 5) LOAD THE SHARED MAP
+ * 5) DIMENSION + MAP-LAYER CONTROLS
+ **********************************************************************/
+
+function populateDimensionSelect(selectElement) {
+  const previousValue = selectElement.value;
+  selectElement.replaceChildren();
+
+  getEnabledDimensions().forEach((dimension) => {
+    const option = document.createElement("option");
+    option.value = dimension.id;
+    option.textContent = dimension.label;
+    selectElement.appendChild(option);
+  });
+
+  if (
+    previousValue &&
+    getEnabledDimensions().some(
+      (dimension) => dimension.id === previousValue
+    )
+  ) {
+    selectElement.value = previousValue;
+  }
+}
+
+function populateMapLayerSelect(
+  selectElement,
+  dimensionId,
+  {
+    includeAllLayers = false,
+    preferredValue = null,
+  } = {}
+) {
+  const dimension = getDimensionDefinition(dimensionId);
+  selectElement.replaceChildren();
+
+  if (includeAllLayers) {
+    const allOption = document.createElement("option");
+    allOption.value = "";
+    allOption.textContent = `All ${dimension?.label || dimensionId} layers`;
+    selectElement.appendChild(allOption);
+  }
+
+  (dimension?.layers || []).forEach((layer) => {
+    const option = document.createElement("option");
+    option.value = layer.id;
+    option.textContent = layer.label;
+    selectElement.appendChild(option);
+  });
+
+  if (
+    preferredValue !== null &&
+    Array.from(selectElement.options).some(
+      (option) => option.value === preferredValue
+    )
+  ) {
+    selectElement.value = preferredValue;
+  } else if (!includeAllLayers) {
+    selectElement.value = getDefaultLayerId(dimensionId);
+  }
+}
+
+function updateWorldContextDescription() {
+  const layer = getLayerDefinition(
+    selectedDimensionId,
+    selectedMapLayerId
+  );
+
+  worldContextDescription.textContent =
+    layer?.description || formatMapContext();
+}
+
+function syncLocationFormContextToMap() {
+  if (editingLocationId) return;
+
+  locationDimensionSelect.value = selectedDimensionId;
+
+  populateMapLayerSelect(
+    locationLayerSelect,
+    selectedDimensionId,
+    {
+      includeAllLayers: true,
+      preferredValue: selectedMapLayerId,
+    }
+  );
+}
+
+function setWorldContext(
+  dimensionId,
+  layerId = null,
+  {
+    refit = true,
+    clearSelections = true,
+  } = {}
+) {
+  const dimension =
+    getDimensionDefinition(dimensionId) ||
+    getEnabledDimensions()[0];
+
+  if (!dimension) return;
+
+  selectedDimensionId = dimension.id;
+
+  const validLayer =
+    dimension.layers?.some(
+      (layer) => layer.id === layerId
+    )
+      ? layerId
+      : getDefaultLayerId(dimension.id);
+
+  selectedMapLayerId = validLayer;
+
+  dimensionSelect.value = selectedDimensionId;
+
+  populateMapLayerSelect(
+    mapLayerSelect,
+    selectedDimensionId,
+    {
+      preferredValue: selectedMapLayerId,
+    }
+  );
+
+  updateWorldContextDescription();
+
+  if (clearSelections) {
+    selectedLocationId = null;
+    selectedBiomeChunk = null;
+    hideBiomeTooltip();
+    setBiomeFormMessage("");
+  }
+
+  if (!editingLocationId) {
+    syncLocationFormContextToMap();
+  }
+
+  populateBiomeDropdown();
+
+  if (refit) {
+    fitMapToLocations(false);
+  }
+
+  renderAll();
+}
+
+function initializeWorldControls() {
+  populateDimensionSelect(dimensionSelect);
+  populateDimensionSelect(locationDimensionSelect);
+
+  const configuredDefault = getWorldConfig().defaultDimension;
+  const enabledIds = getEnabledDimensions().map(
+    (dimension) => dimension.id
+  );
+
+  selectedDimensionId = enabledIds.includes(configuredDefault)
+    ? configuredDefault
+    : enabledIds[0] || "overworld";
+
+  selectedMapLayerId =
+    getDefaultLayerId(selectedDimensionId);
+
+  dimensionSelect.value = selectedDimensionId;
+
+  populateMapLayerSelect(
+    mapLayerSelect,
+    selectedDimensionId,
+    {
+      preferredValue: selectedMapLayerId,
+    }
+  );
+
+  locationDimensionSelect.value = selectedDimensionId;
+
+  populateMapLayerSelect(
+    locationLayerSelect,
+    selectedDimensionId,
+    {
+      includeAllLayers: true,
+      preferredValue: selectedMapLayerId,
+    }
+  );
+
+  updateWorldContextDescription();
+}
+
+dimensionSelect.addEventListener("change", () => {
+  setWorldContext(
+    dimensionSelect.value,
+    getDefaultLayerId(dimensionSelect.value)
+  );
+});
+
+mapLayerSelect.addEventListener("change", () => {
+  setWorldContext(
+    selectedDimensionId,
+    mapLayerSelect.value
+  );
+});
+
+locationDimensionSelect.addEventListener("change", () => {
+  populateMapLayerSelect(
+    locationLayerSelect,
+    locationDimensionSelect.value,
+    {
+      includeAllLayers: true,
+      preferredValue: "",
+    }
+  );
+});
+
+/**********************************************************************
+ * 6) LOAD THE SHARED MAP
  **********************************************************************/
 
 async function loadSharedMap() {
   saveLocationBtn.disabled = true;
+  biomeToggleBtn.disabled = true;
   mapStatus.textContent = "Loading shared locations...";
   locationCount.textContent = "Loading...";
   setFormMessage("Connecting to the shared Realm map...");
 
-  try {
-    if (!window.realmDatabase) {
-      throw new Error("Database connection file did not load.");
-    }
+  if (!window.realmDatabase) {
+    databaseReady = false;
+    biomeDatabaseReady = false;
+    setFormMessage("Database connection file did not load.", true);
+    return;
+  }
 
+  // Locations are the original map feature, so load them independently.
+  try {
     locations = await window.realmDatabase.getLocations();
     databaseReady = true;
-
-    // The first successful load starts with every shared waypoint visible.
-    fitMapToLocations(false);
-
-    // If a selected or edited location disappeared since our last refresh,
-    // safely clear that state.
-    if (selectedLocationId && !getLocationById(selectedLocationId)) {
-      selectedLocationId = null;
-    }
-
-    if (editingLocationId && !getLocationById(editingLocationId)) {
-      cancelEditing();
-    }
-
-    renderAll();
-    setFormMessage("Shared map connected.");
   } catch (error) {
     databaseReady = false;
     locations = [];
-    renderAll();
-    mapStatus.textContent = "Could not load the shared map.";
-    locationCount.textContent = "Connection error";
-    setFormMessage(explainDatabaseError(error, "load the shared map"), true);
-  } finally {
-    saveLocationBtn.disabled = !databaseReady;
+    console.error("Could not load shared locations:", error);
   }
+
+  // Biomes are a separate table. If that table has not been created yet,
+  // waypoint mapping still works; only the biome controls stay disabled.
+  try {
+    chunkBiomes = await window.realmDatabase.getChunkBiomes();
+    biomeDatabaseReady = true;
+  } catch (error) {
+    biomeDatabaseReady = false;
+    chunkBiomes = [];
+    console.error("Could not load chunk biomes:", error);
+  }
+
+  fitMapToLocations(false);
+
+  if (selectedLocationId && !getLocationById(selectedLocationId)) {
+    selectedLocationId = null;
+  }
+
+  if (editingLocationId && !getLocationById(editingLocationId)) {
+    cancelEditing();
+  }
+
+  populateBiomeDropdown();
+  renderAll();
+
+  if (databaseReady) {
+    setFormMessage("Shared map connected.");
+  } else {
+    setFormMessage("Could not load the shared waypoint database.", true);
+  }
+
+  if (!biomeDatabaseReady) {
+    setBiomeFormMessage(
+      "Dimension/layer biome data is not connected yet. Run the V6 Supabase setup, then refresh.",
+      true
+    );
+  }
+
+  saveLocationBtn.disabled = !databaseReady;
+  biomeToggleBtn.disabled =
+    !biomeDatabaseReady || getBiomeOptions().length === 0;
 }
 
 /**********************************************************************
- * 6) FORM: ADD / EDIT LOCATIONS
+ * 7) FORM: ADD / EDIT LOCATIONS
  **********************************************************************/
 
 locationForm.addEventListener("submit", async (event) => {
@@ -237,6 +720,8 @@ locationForm.addEventListener("submit", async (event) => {
 
   const z = Number(zCoordInput.value);
   const notes = locationNotesInput.value.trim();
+  const dimension = locationDimensionSelect.value;
+  const mapLayer = locationLayerSelect.value || null;
 
   if (!name) {
     setFormMessage("Give this location a name.", true);
@@ -277,7 +762,15 @@ locationForm.addEventListener("submit", async (event) => {
 
       const updatedLocation = await window.realmDatabase.updateLocation(
         editingLocationId,
-        { name, x, y, z, notes }
+        {
+          name,
+          x,
+          y,
+          z,
+          notes,
+          dimension,
+          mapLayer,
+        }
       );
 
       const index = locations.findIndex(
@@ -288,8 +781,22 @@ locationForm.addEventListener("submit", async (event) => {
         locations[index] = updatedLocation;
       }
 
+      const destinationLayer =
+        updatedLocation.mapLayer ||
+        getDefaultLayerId(updatedLocation.dimension);
+
+      setWorldContext(
+        updatedLocation.dimension,
+        destinationLayer,
+        {
+          refit: false,
+          clearSelections: false,
+        }
+      );
+
       selectedLocationId = updatedLocation.id;
       cancelEditing(false);
+      fitMapToLocations(false);
       setFormMessage(`Updated ${name}.`);
     } else {
       const newLocation = await window.realmDatabase.addLocation({
@@ -298,15 +805,32 @@ locationForm.addEventListener("submit", async (event) => {
         y,
         z,
         notes,
+        dimension,
+        mapLayer,
       });
 
       locations.push(newLocation);
+
+      const destinationLayer =
+        newLocation.mapLayer ||
+        getDefaultLayerId(newLocation.dimension);
+
+      setWorldContext(
+        newLocation.dimension,
+        destinationLayer,
+        {
+          refit: false,
+          clearSelections: false,
+        }
+      );
+
       selectedLocationId = newLocation.id;
 
       // A new waypoint may be outside the current camera, so refit once.
       fitMapToLocations(false);
 
       locationForm.reset();
+      syncLocationFormContextToMap();
       setFormMessage(`Added ${name} to the shared map.`);
       locationNameInput.focus();
     }
@@ -344,9 +868,22 @@ function beginEditing(id) {
   zCoordInput.value = location.z;
   locationNotesInput.value = location.notes || "";
 
+  locationDimensionSelect.value = location.dimension;
+
+  populateMapLayerSelect(
+    locationLayerSelect,
+    location.dimension,
+    {
+      includeAllLayers: true,
+      preferredValue: location.mapLayer || "",
+    }
+  );
+
   saveLocationBtn.textContent = "Save changes";
   cancelEditBtn.classList.remove("hidden");
-  formModeText.textContent = `Editing ${location.name}.`;
+  if (formModeText) {
+    formModeText.textContent = `Editing ${location.name}.`;
+  }
   setFormMessage("");
 
   renderAll();
@@ -356,12 +893,15 @@ function beginEditing(id) {
 
 function cancelEditing(clearForm = true) {
   editingLocationId = null;
-  saveLocationBtn.textContent = "Add location";
+  saveLocationBtn.textContent = "add location";
   cancelEditBtn.classList.add("hidden");
-  formModeText.textContent = "Enter a named place from your world.";
+  if (formModeText) {
+    formModeText.textContent = "Enter a named place from your world.";
+  }
 
   if (clearForm) {
     locationForm.reset();
+    syncLocationFormContextToMap();
   }
 }
 
@@ -395,7 +935,7 @@ async function deleteLocation(id) {
 }
 
 /**********************************************************************
- * 7) SEARCH / LOCATION LIST
+ * 8) SEARCH / LOCATION LIST
  **********************************************************************/
 
 locationSearch.addEventListener("input", () => {
@@ -404,11 +944,13 @@ locationSearch.addEventListener("input", () => {
 });
 
 function getFilteredLocations() {
-  if (!searchText) return locations;
+  const visibleLocations = getVisibleLocations();
 
-  return locations.filter((location) => {
+  if (!searchText) return visibleLocations;
+
+  return visibleLocations.filter((location) => {
     const searchable =
-      `${location.name} ${location.notes || ""} ${location.x} ${location.y ?? ""} ${location.z}`.toLowerCase();
+      `${location.name} ${location.notes || ""} ${location.x} ${location.y ?? ""} ${location.z} ${formatLocationScope(location)}`.toLowerCase();
 
     return searchable.includes(searchText);
   });
@@ -419,14 +961,17 @@ function renderLocationList() {
 
   const filteredLocations = getFilteredLocations();
 
-  locationCount.textContent = `${locations.length} shared ${locations.length === 1 ? "location" : "locations"}`;
+  const visibleLocations = getVisibleLocations();
+
+  locationCount.textContent =
+    `${visibleLocations.length} visible ${visibleLocations.length === 1 ? "location" : "locations"} · ${formatMapContext()}`;
 
   noSearchResults.classList.toggle(
     "hidden",
-    !(locations.length > 0 && filteredLocations.length === 0)
+    !(visibleLocations.length > 0 && filteredLocations.length === 0)
   );
 
-  if (locations.length === 0) {
+  if (visibleLocations.length === 0) {
     const message = document.createElement("p");
     message.className = "empty-list-message";
     message.textContent = databaseReady
@@ -451,6 +996,7 @@ function renderLocationList() {
     mainButton.setAttribute("aria-label", `Show ${location.name} on the map`);
     mainButton.innerHTML = `
       <span class="location-name">${escapeHtml(location.name)}</span>
+      <span class="location-scope">${escapeHtml(formatLocationScope(location))}</span>
       <span class="location-coords">${escapeHtml(formatCoordinates(location))}</span>
       ${location.notes ? `<span class="location-notes">${escapeHtml(location.notes)}</span>` : ""}
     `;
@@ -478,11 +1024,11 @@ function renderLocationList() {
 }
 
 /**********************************************************************
- * 8) MAP MATH
+ * 9) MAP MATH
  **********************************************************************/
 
 function getFitTransform() {
-  if (locations.length === 0) {
+  if (!hasMapContent()) {
     return {
       centerX: 0,
       centerZ: 0,
@@ -495,8 +1041,27 @@ function getFitTransform() {
     };
   }
 
-  const xs = locations.map((location) => Number(location.x));
-  const zs = locations.map((location) => Number(location.z));
+  const visibleLocations = getVisibleLocations();
+  const currentBiomes = getCurrentChunkBiomes();
+
+  const xs = visibleLocations.map(
+    (location) => Number(location.x)
+  );
+  const zs = visibleLocations.map(
+    (location) => Number(location.z)
+  );
+
+  // Include both edges of every assigned biome chunk in THIS dimension/layer
+  // so Fit Map never jumps across unrelated world maps.
+  currentBiomes.forEach((assignment) => {
+    const chunk = getChunkInfoFromChunkCoords(
+      assignment.chunkX,
+      assignment.chunkZ
+    );
+
+    xs.push(chunk.minX, chunk.minX + CHUNK_SIZE);
+    zs.push(chunk.minZ, chunk.minZ + CHUNK_SIZE);
+  });
 
   const minX = Math.min(...xs);
   const maxX = Math.max(...xs);
@@ -598,7 +1163,7 @@ function clientPointToMap(clientX, clientY) {
 }
 
 function zoomMapAt(mapX, mapY, factor) {
-  if (locations.length === 0 || !Number.isFinite(factor) || factor <= 0) {
+  if (!hasMapContent() || !Number.isFinite(factor) || factor <= 0) {
     return;
   }
 
@@ -645,7 +1210,7 @@ function zoomMapAt(mapX, mapY, factor) {
 }
 
 function panMapByWorld(deltaX, deltaZ) {
-  if (locations.length === 0) return;
+  if (!hasMapContent()) return;
 
   mapViewCenterX += deltaX;
   mapViewCenterZ += deltaZ;
@@ -675,13 +1240,13 @@ function scheduleMapRender() {
 }
 
 function updateMapControls() {
-  const hasLocations = locations.length > 0;
+  const hasContent = hasMapContent();
 
-  zoomOutBtn.disabled = !hasLocations;
-  zoomInBtn.disabled = !hasLocations;
-  fitMapBtn.disabled = !hasLocations;
+  zoomOutBtn.disabled = !hasContent;
+  zoomInBtn.disabled = !hasContent;
+  fitMapBtn.disabled = !hasContent;
 
-  if (!hasLocations) {
+  if (!hasContent) {
     mapZoomLabel.textContent = "Fit";
     return;
   }
@@ -748,20 +1313,25 @@ function chooseChunkAlignedMajorStep(visibleSpanBlocks) {
 }
 
 /**********************************************************************
- * 9) MAP RENDERING
+ * 10) MAP RENDERING
  **********************************************************************/
 
 function renderMap() {
+  biomeLayer.replaceChildren();
   gridLayer.replaceChildren();
   chunkLayer.replaceChildren();
+  biomeSelectionLayer.replaceChildren();
   markerLayer.replaceChildren();
 
-  const hasLocations = locations.length > 0;
-  emptyLayer.classList.toggle("hidden", hasLocations);
+  const hasContent = hasMapContent();
+  const visibleLocations = getVisibleLocations();
+  const currentBiomes = getCurrentChunkBiomes();
 
-  if (!hasLocations) {
+  emptyLayer.classList.toggle("hidden", hasContent);
+
+  if (!hasContent) {
     mapStatus.textContent = databaseReady
-      ? "Add your first location to start the shared map."
+      ? `No mapped data yet for ${formatMapContext()}.`
       : "Loading shared locations...";
     selectedLocationCard.classList.add("hidden");
     updateMapControls();
@@ -772,6 +1342,8 @@ function renderMap() {
   const visibleSpanX = transform.visibleMaxX - transform.visibleMinX;
   const visibleSpanZ = transform.visibleMaxZ - transform.visibleMinZ;
   const largestVisibleSpan = Math.max(visibleSpanX, visibleSpanZ);
+
+  drawBiomeOverlay(transform);
 
   const chunkGridState = drawChunkGrid(transform);
 
@@ -804,6 +1376,7 @@ function renderMap() {
   }
 
   drawSelectedChunk(transform);
+  drawSelectedBiomeChunk(transform);
   drawMarkers(transform);
 
   const blocksPer100Pixels = Math.round(transform.blocksPerPixel * 100);
@@ -813,15 +1386,83 @@ function renderMap() {
       ? "16×16 chunk borders shown"
       : "zoom in to show chunk borders";
 
+  const biomeStatus =
+    biomeOverlayEnabled
+      ? ` · ${currentBiomes.length} assigned ${currentBiomes.length === 1 ? "biome chunk" : "biome chunks"}`
+      : "";
+
   mapStatus.textContent =
-    `${locations.length} ${locations.length === 1 ? "location" : "locations"} · ` +
+    `${formatMapContext()} · ${visibleLocations.length} ${visibleLocations.length === 1 ? "location" : "locations"} · ` +
     `about ${formatNumber(blocksPer100Pixels)} blocks per 100 screen pixels · ` +
-    chunkStatus;
+    chunkStatus +
+    biomeStatus;
 
   updateMapControls();
   renderSelectedLocation();
 }
 
+
+
+function drawBiomeOverlay(transform) {
+  if (!biomeOverlayEnabled) return;
+
+  const ns = "http://www.w3.org/2000/svg";
+
+  getCurrentChunkBiomes().forEach((assignment) => {
+    const chunk = getChunkInfoFromChunkCoords(
+      assignment.chunkX,
+      assignment.chunkZ
+    );
+
+    const left = mapXToScreen(chunk.minX, transform);
+    const right = mapXToScreen(chunk.minX + CHUNK_SIZE, transform);
+    const top = mapZToScreen(chunk.minZ, transform);
+    const bottom = mapZToScreen(chunk.minZ + CHUNK_SIZE, transform);
+
+    if (
+      Math.max(left, right) < 0 ||
+      Math.min(left, right) > MAP_WIDTH ||
+      Math.max(top, bottom) < 0 ||
+      Math.min(top, bottom) > MAP_HEIGHT
+    ) {
+      return;
+    }
+
+    const rect = document.createElementNS(ns, "rect");
+    rect.setAttribute("x", Math.min(left, right));
+    rect.setAttribute("y", Math.min(top, bottom));
+    rect.setAttribute("width", Math.abs(right - left));
+    rect.setAttribute("height", Math.abs(bottom - top));
+    rect.setAttribute("class", "biome-chunk-fill");
+    rect.setAttribute("fill", getBiomeColor(assignment.biomeId));
+
+    biomeLayer.appendChild(rect);
+  });
+}
+
+function drawSelectedBiomeChunk(transform) {
+  if (!biomeOverlayEnabled || !selectedBiomeChunk) return;
+
+  const ns = "http://www.w3.org/2000/svg";
+  const chunk = getChunkInfoFromChunkCoords(
+    selectedBiomeChunk.chunkX,
+    selectedBiomeChunk.chunkZ
+  );
+
+  const left = mapXToScreen(chunk.minX, transform);
+  const right = mapXToScreen(chunk.minX + CHUNK_SIZE, transform);
+  const top = mapZToScreen(chunk.minZ, transform);
+  const bottom = mapZToScreen(chunk.minZ + CHUNK_SIZE, transform);
+
+  const rect = document.createElementNS(ns, "rect");
+  rect.setAttribute("x", Math.min(left, right));
+  rect.setAttribute("y", Math.min(top, bottom));
+  rect.setAttribute("width", Math.abs(right - left));
+  rect.setAttribute("height", Math.abs(bottom - top));
+  rect.setAttribute("class", "biome-selected-chunk");
+
+  biomeSelectionLayer.appendChild(rect);
+}
 
 function drawChunkGrid(transform) {
   const ns = "http://www.w3.org/2000/svg";
@@ -1038,7 +1679,7 @@ function trimDecimal(value) {
 function drawMarkers(transform) {
   const ns = "http://www.w3.org/2000/svg";
 
-  locations.forEach((location) => {
+  getVisibleLocations().forEach((location) => {
     const x = mapXToScreen(Number(location.x), transform);
     const y = mapZToScreen(Number(location.z), transform);
 
@@ -1122,15 +1763,46 @@ function drawMarkers(transform) {
 }
 
 /**********************************************************************
- * 10) SELECTION
+ * 11) SELECTION
  **********************************************************************/
 
 function selectLocation(id) {
-  if (!getLocationById(id)) return;
+  const location = getLocationById(id);
+  if (!location) return;
 
   selectedLocationId = id;
+
+  // If this came from an all-layer location, keep the current layer.
+  // Otherwise make sure the map is showing the location's own layer.
+  if (
+    location.dimension !== selectedDimensionId ||
+    (
+      location.mapLayer !== null &&
+      location.mapLayer !== selectedMapLayerId
+    )
+  ) {
+    setWorldContext(
+      location.dimension,
+      location.mapLayer ||
+        getDefaultLayerId(location.dimension),
+      {
+        refit: false,
+        clearSelections: false,
+      }
+    );
+  }
+
+  if (biomeOverlayEnabled) {
+    const chunk = getChunkInfo(location.x, location.z);
+    selectedBiomeChunk = {
+      chunkX: chunk.chunkX,
+      chunkZ: chunk.chunkZ,
+    };
+  }
+
   renderMap();
   renderLocationList();
+  renderBiomeEditor();
 }
 
 function renderSelectedLocation() {
@@ -1146,6 +1818,7 @@ function renderSelectedLocation() {
   selectedLocationCard.innerHTML = `
     <div class="selected-card-main">
       <p class="selected-card-name">${escapeHtml(location.name)}</p>
+      <p class="location-scope">${escapeHtml(formatLocationScope(location))}</p>
       <p class="selected-card-coords">${escapeHtml(formatCoordinates(location))}</p>
       <p class="chunk-info">${escapeHtml(formatChunkInfo(location))}</p>
       ${location.notes ? `<p class="selected-card-notes">${escapeHtml(location.notes)}</p>` : ""}
@@ -1162,7 +1835,348 @@ function renderSelectedLocation() {
 
 
 /**********************************************************************
- * 11) MAP NAVIGATION
+ * 12) BIOME LAYER / CHUNK ASSIGNMENT
+ **********************************************************************/
+
+function populateBiomeDropdown() {
+  biomeSelect.innerHTML = '<option value="">Choose biome...</option>';
+
+  getBiomeOptionsForContext().forEach((biome) => {
+    const option = document.createElement("option");
+    option.value = biome.id;
+    option.textContent = biome.label;
+    biomeSelect.appendChild(option);
+  });
+
+  updateBiomeColorPreview();
+}
+
+function updateBiomeColorPreview() {
+  const biomeId = biomeSelect.value;
+  const definition = getBiomeDefinition(biomeId);
+
+  biomeColorPreview.style.background =
+    definition?.color || "transparent";
+}
+
+function setBiomeOverlayEnabled(enabled) {
+  biomeOverlayEnabled = Boolean(enabled);
+
+  biomeToggleBtn.classList.toggle(
+    "is-active",
+    biomeOverlayEnabled
+  );
+  biomeToggleBtn.setAttribute(
+    "aria-pressed",
+    String(biomeOverlayEnabled)
+  );
+  biomeToggleBtn.textContent =
+    biomeOverlayEnabled ? "Biomes on" : "Biomes off";
+
+  if (biomeOverlayEnabled) {
+    if (!selectedBiomeChunk && selectedLocationId) {
+      const location = getLocationById(selectedLocationId);
+
+      if (location) {
+        const chunk = getChunkInfo(location.x, location.z);
+        selectedBiomeChunk = {
+          chunkX: chunk.chunkX,
+          chunkZ: chunk.chunkZ,
+        };
+      }
+    }
+  } else {
+    hideBiomeTooltip();
+  }
+
+  renderMap();
+  renderBiomeEditor();
+}
+
+function selectBiomeChunk(chunkX, chunkZ) {
+  if (!biomeOverlayEnabled || !biomeDatabaseReady) return;
+
+  selectedBiomeChunk = {
+    chunkX,
+    chunkZ,
+  };
+
+  setBiomeFormMessage("");
+  renderMap();
+  renderBiomeEditor();
+}
+
+function renderBiomeEditor() {
+  if (
+    !biomeOverlayEnabled ||
+    !biomeDatabaseReady ||
+    !selectedBiomeChunk
+  ) {
+    biomeEditorCard.classList.add("hidden");
+    return;
+  }
+
+  biomeEditorCard.classList.remove("hidden");
+
+  const { chunkX, chunkZ } = selectedBiomeChunk;
+  const assignment = getChunkBiome(chunkX, chunkZ);
+
+  biomeContextLabel.textContent =
+    `${formatMapContext()} · selected chunk`;
+
+  biomeChunkCoords.textContent =
+    formatChunkInfoFromChunkCoords(chunkX, chunkZ);
+
+  if (assignment) {
+    const assignmentOptionExists =
+      Array.from(biomeSelect.options).some(
+        (option) => option.value === assignment.biomeId
+      );
+
+    if (!assignmentOptionExists) {
+      const savedOption = document.createElement("option");
+      savedOption.value = assignment.biomeId;
+      savedOption.textContent =
+        `${getBiomeLabel(assignment.biomeId)} (saved)`;
+      biomeSelect.appendChild(savedOption);
+    }
+
+    biomeSelect.value = assignment.biomeId;
+    biomeNotes.value = assignment.notes || "";
+
+    biomeCurrentBadge.textContent =
+      getBiomeLabel(assignment.biomeId);
+    biomeCurrentSwatch.style.background =
+      getBiomeColor(assignment.biomeId);
+
+    clearBiomeBtn.classList.remove("hidden");
+  } else {
+    biomeSelect.value = "";
+    biomeNotes.value = "";
+
+    biomeCurrentBadge.textContent = "unassigned";
+    biomeCurrentSwatch.style.background = "transparent";
+
+    clearBiomeBtn.classList.add("hidden");
+  }
+
+  updateBiomeColorPreview();
+}
+
+biomeToggleBtn.addEventListener("click", () => {
+  if (!biomeDatabaseReady) {
+    setBiomeFormMessage(
+      "The chunk_biomes table is not connected yet.",
+      true
+    );
+    return;
+  }
+
+  setBiomeOverlayEnabled(!biomeOverlayEnabled);
+});
+
+biomeSelect.addEventListener("change", updateBiomeColorPreview);
+
+biomeForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+
+  if (!selectedBiomeChunk || !biomeDatabaseReady) return;
+
+  const biomeId = biomeSelect.value;
+  const notes = biomeNotes.value.trim();
+
+  if (!biomeId) {
+    setBiomeFormMessage("Choose a biome first.", true);
+    biomeSelect.focus();
+    return;
+  }
+
+  saveBiomeBtn.disabled = true;
+  clearBiomeBtn.disabled = true;
+
+  try {
+    const saved = await window.realmDatabase.saveChunkBiome({
+      dimension: selectedDimensionId,
+      mapLayer: selectedMapLayerId,
+      chunkX: selectedBiomeChunk.chunkX,
+      chunkZ: selectedBiomeChunk.chunkZ,
+      biomeId,
+      notes,
+    });
+
+    const existingIndex = chunkBiomes.findIndex(
+      (assignment) =>
+        assignment.dimension === saved.dimension &&
+        assignment.mapLayer === saved.mapLayer &&
+        assignment.chunkX === saved.chunkX &&
+        assignment.chunkZ === saved.chunkZ
+    );
+
+    if (existingIndex === -1) {
+      chunkBiomes.push(saved);
+    } else {
+      chunkBiomes[existingIndex] = saved;
+    }
+
+    setBiomeFormMessage(
+      `Saved ${getBiomeLabel(saved.biomeId)} for ${formatMapContext(saved.dimension, saved.mapLayer)}, chunk ${formatNumber(saved.chunkX)}, ${formatNumber(saved.chunkZ)}.`
+    );
+
+    renderMap();
+    renderBiomeEditor();
+  } catch (error) {
+    setBiomeFormMessage(
+      explainDatabaseError(error, "save this biome"),
+      true
+    );
+  } finally {
+    saveBiomeBtn.disabled = false;
+    clearBiomeBtn.disabled = false;
+  }
+});
+
+clearBiomeBtn.addEventListener("click", async () => {
+  if (!selectedBiomeChunk || !biomeDatabaseReady) return;
+
+  const { chunkX, chunkZ } = selectedBiomeChunk;
+  const assignment = getChunkBiome(chunkX, chunkZ);
+
+  if (!assignment) return;
+
+  const shouldClear = window.confirm(
+    `Clear the biome assignment for chunk ${chunkX}, ${chunkZ}?`
+  );
+
+  if (!shouldClear) return;
+
+  saveBiomeBtn.disabled = true;
+  clearBiomeBtn.disabled = true;
+
+  try {
+    await window.realmDatabase.deleteChunkBiome(
+      selectedDimensionId,
+      selectedMapLayerId,
+      chunkX,
+      chunkZ
+    );
+
+    chunkBiomes = chunkBiomes.filter(
+      (item) =>
+        !(
+          item.dimension === selectedDimensionId &&
+          item.mapLayer === selectedMapLayerId &&
+          item.chunkX === chunkX &&
+          item.chunkZ === chunkZ
+        )
+    );
+
+    setBiomeFormMessage("Biome assignment cleared.");
+    renderMap();
+    renderBiomeEditor();
+  } catch (error) {
+    setBiomeFormMessage(
+      explainDatabaseError(error, "clear this biome"),
+      true
+    );
+  } finally {
+    saveBiomeBtn.disabled = false;
+    clearBiomeBtn.disabled = false;
+  }
+});
+
+function getWorldPointFromClient(clientX, clientY) {
+  const point = clientPointToMap(clientX, clientY);
+  const transform = getMapTransform();
+
+  return {
+    x:
+      transform.centerX +
+      (point.x - MAP_WIDTH / 2) / transform.scale,
+    z:
+      transform.centerZ +
+      (point.y - MAP_HEIGHT / 2) / transform.scale,
+  };
+}
+
+function getChunkAtClientPoint(clientX, clientY) {
+  const world = getWorldPointFromClient(clientX, clientY);
+
+  return {
+    chunkX: Math.floor(world.x / CHUNK_SIZE),
+    chunkZ: Math.floor(world.z / CHUNK_SIZE),
+  };
+}
+
+function showBiomeTooltip(event) {
+  if (
+    !biomeOverlayEnabled ||
+    event.pointerType !== "mouse" ||
+    panState
+  ) {
+    hideBiomeTooltip();
+    return;
+  }
+
+  const chunk = getChunkAtClientPoint(
+    event.clientX,
+    event.clientY
+  );
+
+  const assignment = getChunkBiome(
+    chunk.chunkX,
+    chunk.chunkZ
+  );
+
+  if (!assignment) {
+    hideBiomeTooltip();
+    return;
+  }
+
+  const name = getBiomeLabel(assignment.biomeId);
+  const notes = assignment.notes
+    ? `<span class="biome-tooltip-meta">${escapeHtml(assignment.notes)}</span>`
+    : "";
+
+  biomeTooltip.innerHTML = `
+    <span class="biome-tooltip-name">${escapeHtml(name)}</span>
+    <span class="biome-tooltip-meta">${escapeHtml(formatMapContext())}</span>
+    <span class="biome-tooltip-meta">chunk ${formatNumber(chunk.chunkX)}, ${formatNumber(chunk.chunkZ)}</span>
+    ${notes}
+  `;
+
+  biomeTooltip.classList.remove("hidden");
+
+  const frameRect = mapFrame.getBoundingClientRect();
+
+  let left = event.clientX - frameRect.left + 12;
+  let top = event.clientY - frameRect.top + 12;
+
+  // Measure after showing, then keep the tooltip inside the map frame.
+  const tooltipWidth = biomeTooltip.offsetWidth;
+  const tooltipHeight = biomeTooltip.offsetHeight;
+
+  left = clamp(
+    left,
+    8,
+    Math.max(8, frameRect.width - tooltipWidth - 8)
+  );
+
+  top = clamp(
+    top,
+    8,
+    Math.max(8, frameRect.height - tooltipHeight - 8)
+  );
+
+  biomeTooltip.style.left = `${left}px`;
+  biomeTooltip.style.top = `${top}px`;
+}
+
+function hideBiomeTooltip() {
+  biomeTooltip.classList.add("hidden");
+}
+
+/**********************************************************************
+ * 13) MAP NAVIGATION
  **********************************************************************/
 
 zoomInBtn.addEventListener("click", () => {
@@ -1189,7 +2203,7 @@ fitMapBtn.addEventListener("click", () => {
 mapSvg.addEventListener(
   "wheel",
   (event) => {
-    if (locations.length === 0) return;
+    if (!hasMapContent()) return;
 
     event.preventDefault();
 
@@ -1217,7 +2231,7 @@ mapSvg.addEventListener("pointerdown", (event) => {
   if (
     event.pointerType !== "mouse" ||
     event.button !== 0 ||
-    locations.length === 0
+    !hasMapContent()
   ) {
     return;
   }
@@ -1242,6 +2256,7 @@ mapSvg.addEventListener("pointerdown", (event) => {
     scale: transform.scale,
     rectWidth: Math.max(rect.width, 1),
     rectHeight: Math.max(rect.height, 1),
+    moved: false,
   };
 
   mapSvg.setPointerCapture(event.pointerId);
@@ -1257,13 +2272,26 @@ mapSvg.addEventListener("pointermove", (event) => {
     return;
   }
 
+  const clientDeltaX =
+    event.clientX - panState.startClientX;
+  const clientDeltaY =
+    event.clientY - panState.startClientY;
+
+  if (
+    Math.hypot(clientDeltaX, clientDeltaY) >=
+    PAN_CLICK_THRESHOLD_PX
+  ) {
+    panState.moved = true;
+    hideBiomeTooltip();
+  }
+
   const deltaMapX =
-    ((event.clientX - panState.startClientX) /
+    (clientDeltaX /
       panState.rectWidth) *
     MAP_WIDTH;
 
   const deltaMapY =
-    ((event.clientY - panState.startClientY) /
+    (clientDeltaY /
       panState.rectHeight) *
     MAP_HEIGHT;
 
@@ -1285,19 +2313,54 @@ function finishMapPan(event) {
     return;
   }
 
+  const wasMoved = panState.moved;
+
   if (mapSvg.hasPointerCapture(event.pointerId)) {
     mapSvg.releasePointerCapture(event.pointerId);
   }
 
   panState = null;
   mapSvg.classList.remove("is-panning");
+
+  if (wasMoved) {
+    suppressMapClickUntil = Date.now() + 250;
+  }
 }
 
 mapSvg.addEventListener("pointerup", finishMapPan);
 mapSvg.addEventListener("pointercancel", finishMapPan);
 
+mapSvg.addEventListener("click", (event) => {
+  if (
+    !biomeOverlayEnabled ||
+    !biomeDatabaseReady ||
+    Date.now() < suppressMapClickUntil
+  ) {
+    return;
+  }
+
+  // Marker clicks already have their own behavior. selectLocation() will
+  // also select that marker's chunk when the biome layer is on.
+  if (
+    event.target.closest &&
+    event.target.closest(".marker-button")
+  ) {
+    return;
+  }
+
+  const chunk = getChunkAtClientPoint(
+    event.clientX,
+    event.clientY
+  );
+
+  selectBiomeChunk(chunk.chunkX, chunk.chunkZ);
+});
+
+mapSvg.addEventListener("pointermove", showBiomeTooltip);
+mapSvg.addEventListener("pointerleave", hideBiomeTooltip);
+
 mapSvg.addEventListener("keydown", (event) => {
-  if (locations.length === 0) return;
+  if (!hasMapContent()) return;
 
   switch (event.key) {
     case "+":
@@ -1355,17 +2418,20 @@ mapSvg.addEventListener("keydown", (event) => {
 window.addEventListener("resize", scheduleMapRender);
 
 /**********************************************************************
- * 12) FULL RENDER
+ * 14) FULL RENDER
  **********************************************************************/
 
 function renderAll() {
   renderMap();
   renderLocationList();
+  renderBiomeEditor();
 }
 
 /**********************************************************************
- * 13) START THE APP
+ * 15) START THE APP
  **********************************************************************/
 
+initializeWorldControls();
+populateBiomeDropdown();
 renderAll();
 loadSharedMap();
