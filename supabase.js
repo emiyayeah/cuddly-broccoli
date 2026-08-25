@@ -46,7 +46,7 @@ function normalizeLocation(row) {
     id: row.id,
     name: row.name,
     x: Number(row.x),
-    y: Number(row.y),
+    y: row.y === null ? null : Number(row.y),
     z: Number(row.z),
     notes: row.notes || "",
     createdAt: row.created_at || null,
