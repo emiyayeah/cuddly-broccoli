@@ -78,7 +78,10 @@ function formatNumber(value) {
 }
 
 function formatCoordinates(location) {
-  return `X ${formatNumber(location.x)} · Y ${formatNumber(location.y)} · Z ${formatNumber(location.z)}`;
+  const yDisplay =
+    location.y === null ? "—" : formatNumber(location.y);
+
+  return `X ${formatNumber(location.x)} · Y ${yDisplay} · Z ${formatNumber(location.z)}`;
 }
 
 function setFormMessage(message, isError = false) {
@@ -156,7 +159,10 @@ locationForm.addEventListener("submit", async (event) => {
 
   const name = locationNameInput.value.trim();
   const x = Number(xCoordInput.value);
-  const y = Number(yCoordInput.value);
+
+  const yText = yCoordInput.value.trim();
+  const y = yText === "" ? null : Number(yText);
+
   const z = Number(zCoordInput.value);
   const notes = locationNotesInput.value.trim();
 
@@ -166,8 +172,13 @@ locationForm.addEventListener("submit", async (event) => {
     return;
   }
 
-  if (![x, y, z].every(Number.isFinite)) {
-    setFormMessage("X, Y, and Z must all be valid numbers.", true);
+  if (!Number.isFinite(x) || !Number.isFinite(z)) {
+  setFormMessage("X and Z must both be valid numbers.", true);
+  return;
+  }
+
+  if (y !== null && !Number.isFinite(y)) {
+    setFormMessage("Y must be a valid number or left blank.", true);
     return;
   }
 
