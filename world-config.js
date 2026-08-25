@@ -16,6 +16,8 @@
 window.WORLD_CONFIG = {
   defaultDimension: "overworld",
 
+  biomeFeatureEnabled: false,
+
   dimensions: [
     {
       id: "overworld",
