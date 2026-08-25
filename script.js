@@ -171,6 +171,10 @@ function getLocationById(id) {
   return locations.find((location) => location.id === id) || null;
 }
 
+function isBiomeFeatureEnabled() {
+  return getWorldConfig().biomeFeatureEnabled !== false;
+}
+
 function getWorldConfig() {
   return window.WORLD_CONFIG || {
     defaultDimension: "overworld",
