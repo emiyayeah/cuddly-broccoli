@@ -102,20 +102,6 @@
         </div>
       </div>
 
-      <div class="world-context-bar" aria-label="Current map">
-        <div class="field world-context-field">
-          <label for="dimensionSelect">Dimension</label>
-          <select id="dimensionSelect"></select>
-        </div>
-
-        <div class="field world-context-field">
-          <label for="mapLayerSelect">Map layer</label>
-          <select id="mapLayerSelect"></select>
-        </div>
-
-        <p id="worldContextDescription" class="world-context-description"></p>
-      </div>
-
       <div class="map-toolbar">
         <div class="map-controls" aria-label="Map zoom controls">
           <button
@@ -183,6 +169,20 @@
             <text x="500" y="370" class="empty-map-subtitle" text-anchor="middle">Add coordinates above and they will appear here.</text>
           </g>
         </svg>
+      </div>
+
+      <div class="world-context-bar" aria-label="Current map">
+        <div class="field world-context-field">
+          <label for="dimensionSelect">Dimension</label>
+          <select id="dimensionSelect"></select>
+        </div>
+
+        <div class="field world-context-field">
+          <label for="mapLayerSelect">Map layer</label>
+          <select id="mapLayerSelect"></select>
+        </div>
+
+        <p id="worldContextDescription" class="world-context-description"></p>
       </div>
 
       <div id="selectedLocationCard" class="selected-card hidden" aria-live="polite"></div>
