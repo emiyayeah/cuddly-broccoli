@@ -14,6 +14,9 @@
   --grid-minor: #e6ebe5;
   --grid-major: #c7d0c7;
   --axis: #8c9b8d;
+  --chunk-border: #96a991;
+  --chunk-highlight: rgba(176, 118, 45, 0.12);
+  --chunk-highlight-border: #b0762d;
   --marker: #315c3b;
   --marker-selected: #b0762d;
   --map-bg: #fbfcfa;
@@ -36,6 +39,9 @@
     --grid-minor: #28312a;
     --grid-major: #39443b;
     --axis: #657267;
+    --chunk-border: #617563;
+    --chunk-highlight: rgba(239, 181, 96, 0.12);
+    --chunk-highlight-border: #efb560;
     --marker: #92c79a;
     --marker-selected: #efb560;
     --map-bg: #171d18;
@@ -300,6 +306,33 @@ h2 {
   fill: var(--muted);
   font-size: 12px;
   font-weight: 650;
+}
+
+.chunk-grid-line {
+  stroke: var(--chunk-border);
+  stroke-width: 1.25;
+  opacity: 0.72;
+  vector-effect: non-scaling-stroke;
+}
+
+.chunk-grid-line.origin-border {
+  stroke-width: 2;
+  opacity: 0.95;
+}
+
+.selected-chunk {
+  fill: var(--chunk-highlight);
+  stroke: var(--chunk-highlight-border);
+  stroke-width: 2.5;
+  vector-effect: non-scaling-stroke;
+  pointer-events: none;
+}
+
+.chunk-info {
+  margin-top: 5px;
+  color: var(--marker-selected);
+  font-size: 0.82rem;
+  font-weight: 750;
 }
 
 .marker-button {

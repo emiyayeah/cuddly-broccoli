@@ -5,9 +5,9 @@
  * Z controls vertical map position.
  * Y is stored and displayed for reference only.
  *
- * Version 2:
- * Locations now come from the shared Supabase database instead of
- * localStorage, so everyone using the site sees the same map.
+ * Version 3:
+ * Locations come from the shared Supabase database, Y may be left blank,
+ * and Minecraft's 16×16 chunk borders are drawn directly from X/Z.
  **********************************************************************/
 
 /**********************************************************************
@@ -22,6 +22,14 @@ const MAP_PADDING = 80;
 // keep at least this many Minecraft blocks visible in each direction so the
 // map does not zoom in absurdly far.
 const MIN_VISIBLE_SPAN_BLOCKS = 400;
+
+// Minecraft chunks are always 16 blocks wide on X and Z.
+const CHUNK_SIZE = 16;
+
+// If the map is so zoomed out that thousands of exact chunk lines would
+// be required, we stop drawing the full grid to keep phones responsive.
+// The selected location's chunk is still highlighted and described.
+const MAX_CHUNK_LINES = 2200;
 
 /**********************************************************************
  * 2) STATE
@@ -51,6 +59,7 @@ const formMessage = document.getElementById("formMessage");
 
 const mapStatus = document.getElementById("mapStatus");
 const gridLayer = document.getElementById("gridLayer");
+const chunkLayer = document.getElementById("chunkLayer");
 const markerLayer = document.getElementById("markerLayer");
 const emptyLayer = document.getElementById("emptyLayer");
 const selectedLocationCard = document.getElementById("selectedLocationCard");
@@ -78,8 +87,7 @@ function formatNumber(value) {
 }
 
 function formatCoordinates(location) {
-  const yDisplay =
-    location.y === null ? "—" : formatNumber(location.y);
+  const yDisplay = location.y === null ? "—" : formatNumber(location.y);
 
   return `X ${formatNumber(location.x)} · Y ${yDisplay} · Z ${formatNumber(location.z)}`;
 }
@@ -91,6 +99,37 @@ function setFormMessage(message, isError = false) {
 
 function getLocationById(id) {
   return locations.find((location) => location.id === id) || null;
+}
+
+function getChunkInfo(x, z) {
+  // Math.floor is important here because Minecraft chunks extend through
+  // negative coordinates too. Example: X -1 belongs to chunk -1, not chunk 0.
+  const chunkX = Math.floor(Number(x) / CHUNK_SIZE);
+  const chunkZ = Math.floor(Number(z) / CHUNK_SIZE);
+
+  const minX = chunkX * CHUNK_SIZE;
+  const maxX = minX + CHUNK_SIZE - 1;
+  const minZ = chunkZ * CHUNK_SIZE;
+  const maxZ = minZ + CHUNK_SIZE - 1;
+
+  return {
+    chunkX,
+    chunkZ,
+    minX,
+    maxX,
+    minZ,
+    maxZ,
+  };
+}
+
+function formatChunkInfo(location) {
+  const chunk = getChunkInfo(location.x, location.z);
+
+  return (
+    `Chunk ${formatNumber(chunk.chunkX)}, ${formatNumber(chunk.chunkZ)} · ` +
+    `X ${formatNumber(chunk.minX)}–${formatNumber(chunk.maxX)} · ` +
+    `Z ${formatNumber(chunk.minZ)}–${formatNumber(chunk.maxZ)}`
+  );
 }
 
 function explainDatabaseError(error, action) {
@@ -173,8 +212,8 @@ locationForm.addEventListener("submit", async (event) => {
   }
 
   if (!Number.isFinite(x) || !Number.isFinite(z)) {
-  setFormMessage("X and Z must both be valid numbers.", true);
-  return;
+    setFormMessage("X and Z must both be valid numbers.", true);
+    return;
   }
 
   if (y !== null && !Number.isFinite(y)) {
@@ -265,7 +304,7 @@ function beginEditing(id) {
 
   locationNameInput.value = location.name;
   xCoordInput.value = location.x;
-  yCoordInput.value = location.y;
+  yCoordInput.value = location.y === null ? "" : location.y;
   zCoordInput.value = location.z;
   locationNotesInput.value = location.notes || "";
 
@@ -331,7 +370,7 @@ function getFilteredLocations() {
 
   return locations.filter((location) => {
     const searchable =
-      `${location.name} ${location.notes || ""} ${location.x} ${location.y} ${location.z}`.toLowerCase();
+      `${location.name} ${location.notes || ""} ${location.x} ${location.y ?? ""} ${location.z}`.toLowerCase();
 
     return searchable.includes(searchText);
   });
@@ -490,6 +529,7 @@ function chooseGridStep(visibleSpanBlocks) {
 
 function renderMap() {
   gridLayer.replaceChildren();
+  chunkLayer.replaceChildren();
   markerLayer.replaceChildren();
 
   const hasLocations = locations.length > 0;
@@ -510,15 +550,103 @@ function renderMap() {
   const minorStep = majorStep / 5;
 
   drawGrid(transform, minorStep, majorStep);
+  const chunkGridVisible = drawChunkGrid(transform);
+  drawSelectedChunk(transform);
   drawMarkers(transform);
 
   const blocksPer100Pixels = Math.round(transform.blocksPerPixel * 100);
 
   mapStatus.textContent =
     `${locations.length} ${locations.length === 1 ? "location" : "locations"} · ` +
-    `about ${formatNumber(blocksPer100Pixels)} blocks per 100 screen pixels`;
+    `about ${formatNumber(blocksPer100Pixels)} blocks per 100 screen pixels · ` +
+    (chunkGridVisible ? "16×16 chunk borders shown" : "chunk grid too dense at this scale");
 
   renderSelectedLocation();
+}
+
+
+function drawChunkGrid(transform) {
+  const ns = "http://www.w3.org/2000/svg";
+
+  const firstChunkX = Math.floor(transform.visibleMinX / CHUNK_SIZE);
+  const lastChunkX = Math.ceil(transform.visibleMaxX / CHUNK_SIZE);
+  const firstChunkZ = Math.floor(transform.visibleMinZ / CHUNK_SIZE);
+  const lastChunkZ = Math.ceil(transform.visibleMaxZ / CHUNK_SIZE);
+
+  const verticalLineCount = lastChunkX - firstChunkX + 1;
+  const horizontalLineCount = lastChunkZ - firstChunkZ + 1;
+  const totalLineCount = verticalLineCount + horizontalLineCount;
+
+  // Exact 16-block borders become visually meaningless when there are
+  // thousands of them packed into the current view. We hide only the full
+  // grid in that case; the selected chunk remains visible.
+  if (totalLineCount > MAX_CHUNK_LINES) {
+    return false;
+  }
+
+  for (let chunkX = firstChunkX; chunkX <= lastChunkX; chunkX += 1) {
+    const worldX = chunkX * CHUNK_SIZE;
+    const screenX = mapXToScreen(worldX, transform);
+
+    if (screenX < 0 || screenX > MAP_WIDTH) continue;
+
+    const line = document.createElementNS(ns, "line");
+    line.setAttribute("x1", screenX);
+    line.setAttribute("x2", screenX);
+    line.setAttribute("y1", 0);
+    line.setAttribute("y2", MAP_HEIGHT);
+    line.setAttribute(
+      "class",
+      worldX === 0 ? "chunk-grid-line origin-border" : "chunk-grid-line"
+    );
+
+    chunkLayer.appendChild(line);
+  }
+
+  for (let chunkZ = firstChunkZ; chunkZ <= lastChunkZ; chunkZ += 1) {
+    const worldZ = chunkZ * CHUNK_SIZE;
+    const screenY = mapZToScreen(worldZ, transform);
+
+    if (screenY < 0 || screenY > MAP_HEIGHT) continue;
+
+    const line = document.createElementNS(ns, "line");
+    line.setAttribute("x1", 0);
+    line.setAttribute("x2", MAP_WIDTH);
+    line.setAttribute("y1", screenY);
+    line.setAttribute("y2", screenY);
+    line.setAttribute(
+      "class",
+      worldZ === 0 ? "chunk-grid-line origin-border" : "chunk-grid-line"
+    );
+
+    chunkLayer.appendChild(line);
+  }
+
+  return true;
+}
+
+function drawSelectedChunk(transform) {
+  const location = getLocationById(selectedLocationId);
+  if (!location) return;
+
+  const ns = "http://www.w3.org/2000/svg";
+  const chunk = getChunkInfo(location.x, location.z);
+
+  // Chunk block coordinates run from min through max inclusive.
+  // The visual box extends to the next chunk border, which is min + 16.
+  const left = mapXToScreen(chunk.minX, transform);
+  const right = mapXToScreen(chunk.minX + CHUNK_SIZE, transform);
+  const top = mapZToScreen(chunk.minZ, transform);
+  const bottom = mapZToScreen(chunk.minZ + CHUNK_SIZE, transform);
+
+  const rect = document.createElementNS(ns, "rect");
+  rect.setAttribute("x", Math.min(left, right));
+  rect.setAttribute("y", Math.min(top, bottom));
+  rect.setAttribute("width", Math.abs(right - left));
+  rect.setAttribute("height", Math.abs(bottom - top));
+  rect.setAttribute("class", "selected-chunk");
+
+  chunkLayer.appendChild(rect);
 }
 
 function drawGrid(transform, minorStep, majorStep) {
@@ -735,6 +863,7 @@ function renderSelectedLocation() {
     <div class="selected-card-main">
       <p class="selected-card-name">${escapeHtml(location.name)}</p>
       <p class="selected-card-coords">${escapeHtml(formatCoordinates(location))}</p>
+      <p class="chunk-info">${escapeHtml(formatChunkInfo(location))}</p>
       ${location.notes ? `<p class="selected-card-notes">${escapeHtml(location.notes)}</p>` : ""}
     </div>
     <button id="selectedEditBtn" class="location-action" type="button">Edit</button>
