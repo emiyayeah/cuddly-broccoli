@@ -156,9 +156,9 @@ function formatChunkInfo(location) {
   const chunk = getChunkInfo(location.x, location.z);
 
   return (
-    `Chunk ${formatNumber(chunk.chunkX)}, ${formatNumber(chunk.chunkZ)} · ` +
-    `X ${formatNumber(chunk.minX)}–${formatNumber(chunk.maxX)} · ` +
-    `Z ${formatNumber(chunk.minZ)}–${formatNumber(chunk.maxZ)}`
+    `chunk coords ${formatNumber(chunk.chunkX)}, ${formatNumber(chunk.chunkZ)}\n` +
+    `X: ${formatNumber(chunk.minX)} to ${formatNumber(chunk.maxX)}\n` +
+    `Z: ${formatNumber(chunk.minZ)} to ${formatNumber(chunk.maxZ)}`
   );
 }
 
