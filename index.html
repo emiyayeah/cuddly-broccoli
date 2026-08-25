@@ -82,7 +82,7 @@
       <div class="section-heading-row map-heading-row">
         <div>
           <h2 id="map-heading">Map</h2>
-          <p id="mapStatus" class="section-note">Add your first location to start the map.</p>
+          <p id="mapStatus" class="section-note">Loading shared locations...</p>
         </div>
         <div class="map-key" aria-label="Map orientation">
           <span>↑ North −Z</span>
@@ -120,7 +120,7 @@
       <div class="section-heading-row locations-heading-row">
         <div>
           <h2 id="locations-heading">Locations</h2>
-          <p id="locationCount" class="section-note">0 saved locations</p>
+          <p id="locationCount" class="section-note">Loading...</p>
         </div>
 
         <div class="search-wrap">
@@ -135,11 +135,18 @@
 
     <footer class="page-footer">
       <p>
-        Version 1 saves locations only in this browser. Shared Realm storage comes next.
+        Shared Realm map · locations are stored in Supabase so everyone using this site sees the same map.
       </p>
     </footer>
   </main>
 
+  <!-- Supabase's browser library -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+  <!-- Our database connection code -->
+  <script src="supabase.js"></script>
+
+  <!-- Our map/application code -->
   <script src="script.js"></script>
 </body>
 </html>
