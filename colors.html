@@ -1,0 +1,1150 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>map color key</title>
+
+  <style>
+    :root {
+      color-scheme: light;
+      --ck-bg: #f3f4f1;
+      --ck-panel: #ffffff;
+      --ck-panel-soft: #f7f8f5;
+      --ck-text: #1d241f;
+      --ck-muted: #69726b;
+      --ck-border: #d7ddd7;
+      --ck-accent: #3d6948;
+      --ck-accent-soft: #e5eee6;
+      --ck-code: #eef1ed;
+      --ck-shadow: 0 8px 24px rgba(31, 49, 35, 0.08);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html {
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system,
+        BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: var(--ck-bg);
+      color: var(--ck-text);
+    }
+
+    body {
+      margin: 0;
+      min-width: 320px;
+      background: var(--ck-bg);
+    }
+
+    button,
+    input {
+      font: inherit;
+    }
+
+    .color-key-shell {
+      width: min(1180px, calc(100% - 28px));
+      margin: 0 auto;
+      padding: 30px 0 50px;
+    }
+
+    .top-row {
+      display: flex;
+      align-items: flex-end;
+      justify-content: space-between;
+      gap: 18px;
+      margin-bottom: 18px;
+    }
+
+    .eyebrow {
+      margin: 0 0 5px;
+      color: var(--ck-accent);
+      font-size: 0.76rem;
+      font-weight: 850;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: clamp(2rem, 5vw, 3.5rem);
+      line-height: 1;
+      letter-spacing: -0.04em;
+    }
+
+    .intro {
+      max-width: 760px;
+      margin: 9px 0 0;
+      color: var(--ck-muted);
+      line-height: 1.55;
+    }
+
+    .back-link {
+      flex: 0 0 auto;
+      color: var(--ck-accent);
+      font-weight: 800;
+      text-decoration: none;
+    }
+
+    .back-link:hover {
+      text-decoration: underline;
+    }
+
+    .toolbar {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 12px;
+      align-items: center;
+      margin: 18px 0;
+      padding: 14px;
+      border: 1px solid var(--ck-border);
+      border-radius: 14px;
+      background: var(--ck-panel);
+      box-shadow: var(--ck-shadow);
+    }
+
+    .search-input {
+      width: 100%;
+      min-height: 44px;
+      padding: 9px 12px;
+      border: 1px solid var(--ck-border);
+      border-radius: 10px;
+      background: var(--ck-panel-soft);
+      color: var(--ck-text);
+      font-size: 1rem;
+    }
+
+    .search-input:focus-visible,
+    .mode-button:focus-visible,
+    .retry-button:focus-visible {
+      outline: 3px solid rgba(61, 105, 72, 0.25);
+      outline-offset: 2px;
+    }
+
+    .mode-buttons {
+      display: flex;
+      gap: 7px;
+      flex-wrap: wrap;
+    }
+
+    .mode-button,
+    .retry-button {
+      min-height: 44px;
+      padding: 8px 13px;
+      border: 1px solid var(--ck-border);
+      border-radius: 10px;
+      background: var(--ck-panel-soft);
+      color: var(--ck-text);
+      cursor: pointer;
+      font-weight: 800;
+    }
+
+    .mode-button.active {
+      border-color: var(--ck-accent);
+      background: var(--ck-accent-soft);
+      color: var(--ck-accent);
+    }
+
+    .status-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 7px 16px;
+      margin: 0 2px 18px;
+      color: var(--ck-muted);
+      font-size: 0.84rem;
+    }
+
+    .section {
+      margin-top: 22px;
+    }
+
+    .section-heading {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 14px;
+      margin-bottom: 10px;
+    }
+
+    .section-heading h2 {
+      margin: 0;
+      font-size: 1.15rem;
+    }
+
+    .section-note {
+      margin: 0;
+      color: var(--ck-muted);
+      font-size: 0.82rem;
+    }
+
+    .group {
+      margin-top: 14px;
+      padding: 16px;
+      border: 1px solid var(--ck-border);
+      border-radius: 16px;
+      background: var(--ck-panel);
+      box-shadow: var(--ck-shadow);
+    }
+
+    .group-title {
+      margin: 0 0 12px;
+      color: var(--ck-muted);
+      font-size: 0.76rem;
+      font-weight: 850;
+      letter-spacing: 0.09em;
+      text-transform: uppercase;
+    }
+
+    .color-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(270px, 1fr));
+      gap: 10px;
+    }
+
+    .color-card {
+      min-width: 0;
+      padding: 12px;
+      border: 1px solid var(--ck-border);
+      border-radius: 12px;
+      background: var(--ck-panel-soft);
+    }
+
+    .color-card.hidden-by-search {
+      display: none;
+    }
+
+    .color-card-head {
+      display: grid;
+      grid-template-columns: 58px minmax(0, 1fr);
+      gap: 11px;
+      align-items: start;
+    }
+
+    .swatch-stack {
+      display: grid;
+      gap: 5px;
+    }
+
+    .swatch {
+      position: relative;
+      width: 58px;
+      height: 34px;
+      overflow: hidden;
+      border: 1px solid rgba(0, 0, 0, 0.16);
+      border-radius: 8px;
+      background:
+        linear-gradient(45deg, #ddd 25%, transparent 25%) 0 0 / 10px 10px,
+        linear-gradient(-45deg, #ddd 25%, transparent 25%) 0 5px / 10px 10px,
+        linear-gradient(45deg, transparent 75%, #ddd 75%) 5px -5px / 10px 10px,
+        linear-gradient(-45deg, transparent 75%, #ddd 75%) -5px 0 / 10px 10px,
+        #fff;
+    }
+
+    .swatch-fill {
+      position: absolute;
+      inset: 0;
+    }
+
+    .swatch-label {
+      color: var(--ck-muted);
+      font-size: 0.66rem;
+      font-weight: 800;
+      text-align: center;
+      text-transform: uppercase;
+    }
+
+    .variable-name,
+    .literal-name {
+      margin: 0;
+      overflow-wrap: anywhere;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 0.9rem;
+      font-weight: 850;
+    }
+
+    .friendly-name {
+      margin: 4px 0 0;
+      color: var(--ck-muted);
+      font-size: 0.82rem;
+      line-height: 1.35;
+    }
+
+    .value-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 5px 9px;
+      margin-top: 8px;
+      color: var(--ck-muted);
+      font-size: 0.72rem;
+    }
+
+    code {
+      padding: 2px 5px;
+      border-radius: 5px;
+      background: var(--ck-code);
+      color: var(--ck-text);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 0.72rem;
+      overflow-wrap: anywhere;
+    }
+
+    .usage-block {
+      margin-top: 10px;
+      padding-top: 9px;
+      border-top: 1px solid var(--ck-border);
+    }
+
+    .usage-title {
+      margin: 0 0 6px;
+      color: var(--ck-muted);
+      font-size: 0.68rem;
+      font-weight: 850;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+    }
+
+    .usage-list {
+      display: grid;
+      gap: 5px;
+      margin: 0;
+      padding: 0;
+      list-style: none;
+    }
+
+    .usage-item {
+      min-width: 0;
+      color: var(--ck-muted);
+      font-size: 0.72rem;
+      line-height: 1.4;
+    }
+
+    .usage-selector {
+      color: var(--ck-text);
+      font-weight: 750;
+      overflow-wrap: anywhere;
+    }
+
+    .more-uses {
+      color: var(--ck-accent);
+      font-weight: 800;
+    }
+
+    .error-box,
+    .empty-box {
+      padding: 16px;
+      border: 1px solid var(--ck-border);
+      border-radius: 14px;
+      background: var(--ck-panel);
+      color: var(--ck-muted);
+      line-height: 1.5;
+    }
+
+    .error-box strong {
+      color: var(--ck-text);
+    }
+
+    .retry-button {
+      margin-top: 10px;
+    }
+
+    .hardcoded-note {
+      margin: 0 0 12px;
+      padding: 11px 12px;
+      border-left: 4px solid var(--ck-accent);
+      border-radius: 8px;
+      background: var(--ck-accent-soft);
+      color: var(--ck-text);
+      font-size: 0.82rem;
+      line-height: 1.45;
+    }
+
+    .hidden {
+      display: none !important;
+    }
+
+    @media (max-width: 700px) {
+      .top-row {
+        align-items: flex-start;
+        flex-direction: column;
+      }
+
+      .toolbar {
+        grid-template-columns: 1fr;
+      }
+
+      .mode-buttons {
+        width: 100%;
+      }
+
+      .mode-button {
+        flex: 1 1 0;
+      }
+
+      .color-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+
+<body>
+  <main class="color-key-shell">
+    <div class="top-row">
+      <div>
+        <p class="eyebrow">cuddly broccoli</p>
+        <h1>map color key</h1>
+        <p class="intro">
+          A live inventory of the colors in <code>styles.css</code>.
+          Variable cards show where each color is actually used in the stylesheet,
+          and the section at the bottom catches colors that are still hard-coded.
+        </p>
+      </div>
+
+      <a class="back-link" href="index.html">← back to map</a>
+    </div>
+
+    <div class="toolbar">
+      <input
+        id="searchInput"
+        class="search-input"
+        type="search"
+        placeholder="search colors, variables, selectors, or uses…"
+        aria-label="Search colors"
+      />
+
+      <div class="mode-buttons" aria-label="Swatch preview mode">
+        <button class="mode-button active" type="button" data-mode="both">
+          light + dark
+        </button>
+        <button class="mode-button" type="button" data-mode="light">
+          light
+        </button>
+        <button class="mode-button" type="button" data-mode="dark">
+          dark
+        </button>
+      </div>
+    </div>
+
+    <div id="statusRow" class="status-row" aria-live="polite">
+      <span>reading styles.css…</span>
+    </div>
+
+    <div id="errorBox" class="error-box hidden">
+      <strong>I couldn't read styles.css.</strong>
+      <div id="errorMessage"></div>
+      <button id="retryButton" class="retry-button" type="button">
+        try again
+      </button>
+    </div>
+
+    <div id="content" class="hidden">
+      <section class="section">
+        <div class="section-heading">
+          <h2>css variables</h2>
+          <p class="section-note">
+            Change these in <code>:root</code> in styles.css.
+          </p>
+        </div>
+
+        <div id="variableGroups"></div>
+      </section>
+
+      <section class="section">
+        <div class="section-heading">
+          <h2>hard-coded colors</h2>
+          <p class="section-note">
+            These aren't controlled by a named variable yet.
+          </p>
+        </div>
+
+        <p class="hardcoded-note">
+          This section is useful for spotting colors that can be easy to miss.
+          If you find yourself changing one repeatedly, it may be worth turning it
+          into a CSS variable.
+        </p>
+
+        <div id="literalGrid" class="color-grid"></div>
+        <div id="literalEmpty" class="empty-box hidden">
+          No hard-coded color values found.
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <script>
+    (() => {
+      "use strict";
+
+      const FRIENDLY_LABELS = {
+        "--bg": "page background",
+        "--panel": "main cards and sections",
+        "--panel-soft": "inputs, controls, rows, and soft card backgrounds",
+        "--text": "primary text",
+        "--muted": "secondary text, labels, hints, and grid labels",
+        "--border": "card, input, map, and control borders",
+
+        "--accent": "primary buttons, eyebrow text, and active controls",
+        "--accent-strong": "strong accent text",
+        "--accent-soft": "soft accent / active-control background",
+
+        "--danger": "errors and destructive actions",
+        "--danger-soft": "soft destructive-action background",
+
+        "--grid-minor": "minor coordinate grid lines",
+        "--grid-major": "major coordinate grid lines",
+        "--axis": "X = 0 and Z = 0 axis lines",
+        "--chunk-border": "16 × 16 Minecraft chunk borders",
+        "--chunk-highlight": "selected chunk fill",
+        "--chunk-highlight-border": "selected chunk outline",
+
+        "--biome-selection": "selected biome chunk outline",
+        "--biome-tooltip-bg": "biome tooltip background",
+        "--biome-tooltip-text": "biome tooltip text",
+
+        "--marker": "normal location marker",
+        "--marker-selected": "selected location marker and chunk info",
+        "--map-bg": "map canvas background",
+        "--shadow": "panel shadow"
+      };
+
+      const GROUPS = [
+        {
+          id: "page",
+          title: "page + panels",
+          variables: ["--bg", "--panel", "--panel-soft", "--shadow"]
+        },
+        {
+          id: "type",
+          title: "text + borders",
+          variables: ["--text", "--muted", "--border"]
+        },
+        {
+          id: "controls",
+          title: "controls + status",
+          variables: [
+            "--accent",
+            "--accent-strong",
+            "--accent-soft",
+            "--danger",
+            "--danger-soft"
+          ]
+        },
+        {
+          id: "grid",
+          title: "map + grid",
+          variables: [
+            "--map-bg",
+            "--grid-minor",
+            "--grid-major",
+            "--axis",
+            "--chunk-border",
+            "--chunk-highlight",
+            "--chunk-highlight-border"
+          ]
+        },
+        {
+          id: "markers",
+          title: "locations + biomes",
+          variables: [
+            "--marker",
+            "--marker-selected",
+            "--biome-selection",
+            "--biome-tooltip-bg",
+            "--biome-tooltip-text"
+          ]
+        }
+      ];
+
+      const searchInput = document.getElementById("searchInput");
+      const statusRow = document.getElementById("statusRow");
+      const errorBox = document.getElementById("errorBox");
+      const errorMessage = document.getElementById("errorMessage");
+      const retryButton = document.getElementById("retryButton");
+      const content = document.getElementById("content");
+      const variableGroups = document.getElementById("variableGroups");
+      const literalGrid = document.getElementById("literalGrid");
+      const literalEmpty = document.getElementById("literalEmpty");
+      const modeButtons = Array.from(
+        document.querySelectorAll(".mode-button")
+      );
+
+      let previewMode = "both";
+      let allCards = [];
+
+      function normalizeWhitespace(text) {
+        return String(text || "").replace(/\s+/g, " ").trim();
+      }
+
+      function isDarkMedia(conditionText) {
+        return String(conditionText || "")
+          .toLowerCase()
+          .includes("prefers-color-scheme: dark");
+      }
+
+      function colorTokensFromValue(value) {
+        const text = String(value || "");
+        const found = [];
+
+        const patterns = [
+          /#[0-9a-fA-F]{3,8}\b/g,
+          /\brgba?\([^)]*\)/gi,
+          /\bhsla?\([^)]*\)/gi,
+          /\boklch\([^)]*\)/gi,
+          /\boklab\([^)]*\)/gi
+        ];
+
+        for (const pattern of patterns) {
+          const matches = text.match(pattern) || [];
+          found.push(...matches);
+        }
+
+        return [...new Set(found.map((item) => item.trim()))];
+      }
+
+      function collectRules(ruleList, state, mediaContext = "default") {
+        for (const rule of Array.from(ruleList || [])) {
+          if (rule.type === CSSRule.STYLE_RULE) {
+            const selector = normalizeWhitespace(rule.selectorText);
+
+            for (const property of Array.from(rule.style)) {
+              const value = rule.style.getPropertyValue(property).trim();
+
+              if (selector === ":root" && property.startsWith("--")) {
+                if (!state.variables.has(property)) {
+                  state.variables.set(property, {
+                    name: property,
+                    light: null,
+                    dark: null,
+                    uses: []
+                  });
+                }
+
+                const item = state.variables.get(property);
+
+                if (mediaContext === "dark") {
+                  item.dark = value;
+                } else if (!item.light) {
+                  item.light = value;
+                }
+
+                continue;
+              }
+
+              const variableMatches = [
+                ...value.matchAll(/var\(\s*(--[A-Za-z0-9_-]+)/g)
+              ];
+
+              for (const match of variableMatches) {
+                const variableName = match[1];
+
+                if (!state.variables.has(variableName)) {
+                  state.variables.set(variableName, {
+                    name: variableName,
+                    light: null,
+                    dark: null,
+                    uses: []
+                  });
+                }
+
+                state.variables.get(variableName).uses.push({
+                  selector,
+                  property,
+                  context: mediaContext
+                });
+              }
+
+              if (!value.includes("var(")) {
+                for (const color of colorTokensFromValue(value)) {
+                  const key = color.toLowerCase();
+
+                  if (!state.literals.has(key)) {
+                    state.literals.set(key, {
+                      value: color,
+                      uses: []
+                    });
+                  }
+
+                  state.literals.get(key).uses.push({
+                    selector,
+                    property,
+                    context: mediaContext,
+                    fullValue: value
+                  });
+                }
+              }
+            }
+          } else if (rule.type === CSSRule.MEDIA_RULE) {
+            const nextContext = isDarkMedia(rule.conditionText)
+              ? "dark"
+              : mediaContext;
+
+            collectRules(rule.cssRules, state, nextContext);
+          } else if ("cssRules" in rule && rule.cssRules) {
+            collectRules(rule.cssRules, state, mediaContext);
+          }
+        }
+      }
+
+      function dedupeUses(uses) {
+        const seen = new Set();
+
+        return uses.filter((use) => {
+          const key =
+            use.selector +
+            "|" +
+            use.property +
+            "|" +
+            use.context +
+            "|" +
+            (use.fullValue || "");
+
+          if (seen.has(key)) {
+            return false;
+          }
+
+          seen.add(key);
+          return true;
+        });
+      }
+
+      function groupForVariable(name) {
+        for (const group of GROUPS) {
+          if (group.variables.includes(name)) {
+            return group.id;
+          }
+        }
+
+        return "other";
+      }
+
+      function makeSwatch(value, label) {
+        const stack = document.createElement("div");
+        stack.className = "swatch-stack";
+        stack.dataset.swatchMode = label;
+
+        const swatch = document.createElement("div");
+        swatch.className = "swatch";
+
+        const fill = document.createElement("div");
+        fill.className = "swatch-fill";
+        fill.style.background = value || "transparent";
+        swatch.appendChild(fill);
+
+        const text = document.createElement("div");
+        text.className = "swatch-label";
+        text.textContent = label;
+
+        stack.append(swatch, text);
+        return stack;
+      }
+
+      function buildUsageBlock(uses) {
+        const cleanUses = dedupeUses(uses);
+        const block = document.createElement("div");
+        block.className = "usage-block";
+
+        const title = document.createElement("p");
+        title.className = "usage-title";
+        title.textContent = cleanUses.length
+          ? "used by"
+          : "not referenced elsewhere";
+
+        block.appendChild(title);
+
+        if (!cleanUses.length) {
+          return block;
+        }
+
+        const list = document.createElement("ul");
+        list.className = "usage-list";
+
+        const maxVisible = 6;
+
+        cleanUses.slice(0, maxVisible).forEach((use) => {
+          const item = document.createElement("li");
+          item.className = "usage-item";
+
+          const selector = document.createElement("span");
+          selector.className = "usage-selector";
+          selector.textContent = use.selector;
+
+          const property = document.createElement("code");
+          property.textContent = use.property;
+
+          item.append(selector, " → ", property);
+
+          if (use.context === "dark") {
+            item.append(" (dark mode)");
+          }
+
+          list.appendChild(item);
+        });
+
+        if (cleanUses.length > maxVisible) {
+          const more = document.createElement("li");
+          more.className = "usage-item more-uses";
+          more.textContent =
+            "+" + (cleanUses.length - maxVisible) + " more use" +
+            (cleanUses.length - maxVisible === 1 ? "" : "s");
+          list.appendChild(more);
+        }
+
+        block.appendChild(list);
+        return block;
+      }
+
+      function buildVariableCard(item) {
+        const card = document.createElement("article");
+        card.className = "color-card";
+        card.dataset.kind = "variable";
+        card.dataset.name = item.name;
+
+        const searchText = [
+          item.name,
+          FRIENDLY_LABELS[item.name] || "",
+          item.light || "",
+          item.dark || "",
+          ...item.uses.flatMap((use) => [
+            use.selector,
+            use.property
+          ])
+        ]
+          .join(" ")
+          .toLowerCase();
+
+        card.dataset.search = searchText;
+
+        const head = document.createElement("div");
+        head.className = "color-card-head";
+
+        const swatches = document.createElement("div");
+
+        const lightValue = item.light || item.dark || "transparent";
+        const darkValue = item.dark || item.light || "transparent";
+
+        swatches.appendChild(makeSwatch(lightValue, "light"));
+        swatches.appendChild(makeSwatch(darkValue, "dark"));
+
+        const info = document.createElement("div");
+
+        const name = document.createElement("p");
+        name.className = "variable-name";
+        name.textContent = item.name;
+
+        const friendly = document.createElement("p");
+        friendly.className = "friendly-name";
+        friendly.textContent =
+          FRIENDLY_LABELS[item.name] ||
+          "CSS color variable";
+
+        const values = document.createElement("div");
+        values.className = "value-row";
+
+        const lightCode = document.createElement("code");
+        lightCode.textContent =
+          "light: " + (item.light || "not set");
+
+        const darkCode = document.createElement("code");
+        darkCode.textContent =
+          "dark: " + (item.dark || "same as light");
+
+        values.append(lightCode, darkCode);
+        info.append(name, friendly, values);
+        head.append(swatches, info);
+
+        card.append(head, buildUsageBlock(item.uses));
+        return card;
+      }
+
+      function buildLiteralCard(item) {
+        const card = document.createElement("article");
+        card.className = "color-card";
+        card.dataset.kind = "literal";
+
+        const searchText = [
+          item.value,
+          ...item.uses.flatMap((use) => [
+            use.selector,
+            use.property,
+            use.fullValue || ""
+          ])
+        ]
+          .join(" ")
+          .toLowerCase();
+
+        card.dataset.search = searchText;
+
+        const head = document.createElement("div");
+        head.className = "color-card-head";
+
+        const swatches = document.createElement("div");
+        swatches.appendChild(makeSwatch(item.value, "color"));
+
+        const info = document.createElement("div");
+
+        const name = document.createElement("p");
+        name.className = "literal-name";
+        name.textContent = item.value;
+
+        const friendly = document.createElement("p");
+        friendly.className = "friendly-name";
+        friendly.textContent = "hard-coded color value";
+
+        info.append(name, friendly);
+        head.append(swatches, info);
+
+        card.append(head, buildUsageBlock(item.uses));
+        return card;
+      }
+
+      function renderVariables(variableItems) {
+        variableGroups.replaceChildren();
+
+        const grouped = new Map();
+
+        for (const group of GROUPS) {
+          grouped.set(group.id, []);
+        }
+
+        grouped.set("other", []);
+
+        for (const item of variableItems) {
+          grouped.get(groupForVariable(item.name)).push(item);
+        }
+
+        const orderedGroups = [
+          ...GROUPS,
+          { id: "other", title: "other variables" }
+        ];
+
+        for (const group of orderedGroups) {
+          const items = grouped.get(group.id) || [];
+
+          if (!items.length) {
+            continue;
+          }
+
+          const wrapper = document.createElement("div");
+          wrapper.className = "group";
+          wrapper.dataset.group = group.id;
+
+          const title = document.createElement("p");
+          title.className = "group-title";
+          title.textContent = group.title;
+
+          const grid = document.createElement("div");
+          grid.className = "color-grid";
+
+          items.forEach((item) => {
+            grid.appendChild(buildVariableCard(item));
+          });
+
+          wrapper.append(title, grid);
+          variableGroups.appendChild(wrapper);
+        }
+      }
+
+      function renderLiterals(literalItems) {
+        literalGrid.replaceChildren();
+
+        literalItems.forEach((item) => {
+          literalGrid.appendChild(buildLiteralCard(item));
+        });
+
+        literalEmpty.classList.toggle(
+          "hidden",
+          literalItems.length !== 0
+        );
+      }
+
+      function applyPreviewMode() {
+        document
+          .querySelectorAll("[data-swatch-mode]")
+          .forEach((stack) => {
+            const label = stack.dataset.swatchMode;
+
+            if (label === "color") {
+              stack.classList.remove("hidden");
+              return;
+            }
+
+            const shouldShow =
+              previewMode === "both" ||
+              previewMode === label;
+
+            stack.classList.toggle("hidden", !shouldShow);
+          });
+
+        modeButtons.forEach((button) => {
+          const active = button.dataset.mode === previewMode;
+          button.classList.toggle("active", active);
+          button.setAttribute(
+            "aria-pressed",
+            active ? "true" : "false"
+          );
+        });
+      }
+
+      function applySearch() {
+        const query = searchInput.value.trim().toLowerCase();
+
+        allCards.forEach((card) => {
+          const matches =
+            !query || card.dataset.search.includes(query);
+
+          card.classList.toggle(
+            "hidden-by-search",
+            !matches
+          );
+        });
+
+        document
+          .querySelectorAll(".group")
+          .forEach((group) => {
+            const visible = group.querySelector(
+              ".color-card:not(.hidden-by-search)"
+            );
+
+            group.classList.toggle("hidden", !visible);
+          });
+      }
+
+      async function loadStyles() {
+        errorBox.classList.add("hidden");
+        content.classList.add("hidden");
+        statusRow.textContent = "reading styles.css…";
+
+        try {
+          const response = await fetch("styles.css", {
+            cache: "no-store"
+          });
+
+          if (!response.ok) {
+            throw new Error(
+              "styles.css returned HTTP " + response.status
+            );
+          }
+
+          const cssText = await response.text();
+
+          const sheet = new CSSStyleSheet();
+          sheet.replaceSync(cssText);
+
+          const state = {
+            variables: new Map(),
+            literals: new Map()
+          };
+
+          collectRules(sheet.cssRules, state);
+
+          const variables = Array.from(
+            state.variables.values()
+          );
+
+          variables.forEach((item) => {
+            item.uses = dedupeUses(item.uses);
+          });
+
+          variables.sort((a, b) => {
+            const groupA = groupForVariable(a.name);
+            const groupB = groupForVariable(b.name);
+
+            const order = [
+              "page",
+              "type",
+              "controls",
+              "grid",
+              "markers",
+              "other"
+            ];
+
+            const groupDifference =
+              order.indexOf(groupA) - order.indexOf(groupB);
+
+            if (groupDifference !== 0) {
+              return groupDifference;
+            }
+
+            const knownOrderA = GROUPS
+              .find((group) => group.id === groupA)
+              ?.variables.indexOf(a.name) ?? -1;
+
+            const knownOrderB = GROUPS
+              .find((group) => group.id === groupB)
+              ?.variables.indexOf(b.name) ?? -1;
+
+            if (knownOrderA >= 0 && knownOrderB >= 0) {
+              return knownOrderA - knownOrderB;
+            }
+
+            return a.name.localeCompare(b.name);
+          });
+
+          const literals = Array.from(
+            state.literals.values()
+          );
+
+          literals.forEach((item) => {
+            item.uses = dedupeUses(item.uses);
+          });
+
+          literals.sort((a, b) =>
+            a.value.localeCompare(b.value)
+          );
+
+          renderVariables(variables);
+          renderLiterals(literals);
+
+          allCards = Array.from(
+            document.querySelectorAll(".color-card")
+          );
+
+          statusRow.replaceChildren();
+
+          const source = document.createElement("span");
+          source.textContent = "source: styles.css";
+
+          const variableCount = document.createElement("span");
+          variableCount.textContent =
+            variables.length + " CSS variables";
+
+          const literalCount = document.createElement("span");
+          literalCount.textContent =
+            literals.length + " hard-coded colors";
+
+          statusRow.append(
+            source,
+            variableCount,
+            literalCount
+          );
+
+          content.classList.remove("hidden");
+          applyPreviewMode();
+          applySearch();
+        } catch (error) {
+          statusRow.textContent = "couldn't read styles.css";
+          errorMessage.textContent =
+            " " +
+            (error?.message || String(error)) +
+            ". This page needs to be in the same GitHub Pages folder as styles.css.";
+
+          errorBox.classList.remove("hidden");
+        }
+      }
+
+      searchInput.addEventListener("input", applySearch);
+
+      modeButtons.forEach((button) => {
+        button.addEventListener("click", () => {
+          previewMode = button.dataset.mode || "both";
+          applyPreviewMode();
+        });
+      });
+
+      retryButton.addEventListener("click", loadStyles);
+
+      loadStyles();
+    })();
+  </script>
+</body>
+</html>
