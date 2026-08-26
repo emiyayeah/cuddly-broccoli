@@ -5,10 +5,10 @@
  * Z controls vertical map position.
  * Y is stored and displayed for reference only.
  *
- * Version 6:
- * Dimension-aware waypoints, vertical map layers, shared chunk biomes,
- * optional Y, Minecraft 16×16 chunk borders, zoom/pan/Fit Map controls,
- * color-coded biome overlays, chunk selection, and biome hover tooltips.
+ * Version 6.1:
+ * Dimension-aware waypoints, vertical map layers, an "all overworld layers"
+ * composite view, shared chunk biomes, optional Y, Minecraft 16×16 chunk
+ * borders, zoom/pan/Fit Map controls, biome overlays, and chunk selection.
  **********************************************************************/
 
 /**********************************************************************
@@ -42,6 +42,9 @@ const ZOOM_BUTTON_FACTOR = 1.4;
 const WHEEL_ZOOM_SPEED = 0.0015;
 const KEYBOARD_PAN_FRACTION = 0.12;
 const PAN_CLICK_THRESHOLD_PX = 6;
+
+// Special map-only view. This is NOT stored in Supabase as a location layer.
+const ALL_MAP_LAYERS_ID = "__all__";
 
 /**********************************************************************
  * 2) STATE
@@ -175,6 +178,27 @@ function isBiomeFeatureEnabled() {
   return getWorldConfig().biomeFeatureEnabled !== false;
 }
 
+function isAllLayersView() {
+  return (
+    selectedDimensionId === "overworld" &&
+    selectedMapLayerId === ALL_MAP_LAYERS_ID
+  );
+}
+
+function supportsAllLayersMapView(dimensionId) {
+  const dimension = getDimensionDefinition(dimensionId);
+
+  return (
+    dimensionId === "overworld" &&
+    Array.isArray(dimension?.layers) &&
+    dimension.layers.length > 1
+  );
+}
+
+function canUseBiomeFeatureInCurrentContext() {
+  return isBiomeFeatureEnabled() && !isAllLayersView();
+}
+
 function getWorldConfig() {
   return window.WORLD_CONFIG || {
     defaultDimension: "overworld",
@@ -234,6 +258,13 @@ function getDimensionLabel(dimensionId) {
 }
 
 function getLayerLabel(dimensionId, layerId) {
+  if (
+    dimensionId === "overworld" &&
+    layerId === ALL_MAP_LAYERS_ID
+  ) {
+    return "all layers";
+  }
+
   return (
     getLayerDefinition(dimensionId, layerId)?.label ||
     layerId
@@ -251,17 +282,31 @@ function formatMapContext(
 }
 
 function getVisibleLocations() {
-  return locations.filter(
-    (location) =>
-      location.dimension === selectedDimensionId &&
-      (
-        location.mapLayer === null ||
-        location.mapLayer === selectedMapLayerId
-      )
-  );
+  return locations.filter((location) => {
+    if (location.dimension !== selectedDimensionId) {
+      return false;
+    }
+
+    // Composite Overworld view: show every Overworld waypoint, whether it
+    // belongs to Surface, Underground, Bottom, or all layers.
+    if (isAllLayersView()) {
+      return true;
+    }
+
+    return (
+      location.mapLayer === null ||
+      location.mapLayer === selectedMapLayerId
+    );
+  });
 }
 
 function getCurrentChunkBiomes() {
+  // A single X/Z chunk may have different biomes on Surface, Underground,
+  // and Bottom, so a combined biome overlay would be misleading.
+  if (isAllLayersView()) {
+    return [];
+  }
+
   return chunkBiomes.filter(
     (assignment) =>
       assignment.dimension === selectedDimensionId &&
@@ -286,6 +331,13 @@ function getBiomeOptionsForContext(
   dimensionId = selectedDimensionId,
   layerId = selectedMapLayerId
 ) {
+  if (
+    dimensionId === "overworld" &&
+    layerId === ALL_MAP_LAYERS_ID
+  ) {
+    return [];
+  }
+
   return getBiomeOptions().filter((biome) => {
     const dimensionsOkay =
       !Array.isArray(biome.dimensions) ||
@@ -455,11 +507,22 @@ function populateMapLayerSelect(
   dimensionId,
   {
     includeAllLayers = false,
+    includeCombinedView = false,
     preferredValue = null,
   } = {}
 ) {
   const dimension = getDimensionDefinition(dimensionId);
   selectElement.replaceChildren();
+
+  if (
+    includeCombinedView &&
+    supportsAllLayersMapView(dimensionId)
+  ) {
+    const combinedOption = document.createElement("option");
+    combinedOption.value = ALL_MAP_LAYERS_ID;
+    combinedOption.textContent = "all overworld layers";
+    selectElement.appendChild(combinedOption);
+  }
 
   if (includeAllLayers) {
     const allOption = document.createElement("option");
@@ -488,6 +551,12 @@ function populateMapLayerSelect(
 }
 
 function updateWorldContextDescription() {
+  if (isAllLayersView()) {
+    worldContextDescription.textContent =
+      "surface, underground, and bottom locations shown together.";
+    return;
+  }
+
   const layer = getLayerDefinition(
     selectedDimensionId,
     selectedMapLayerId
@@ -507,7 +576,9 @@ function syncLocationFormContextToMap() {
     selectedDimensionId,
     {
       includeAllLayers: true,
-      preferredValue: selectedMapLayerId,
+      preferredValue: isAllLayersView()
+        ? ""
+        : selectedMapLayerId,
     }
   );
 }
@@ -529,11 +600,16 @@ function setWorldContext(
   selectedDimensionId = dimension.id;
 
   const validLayer =
-    dimension.layers?.some(
-      (layer) => layer.id === layerId
+    (
+      layerId === ALL_MAP_LAYERS_ID &&
+      supportsAllLayersMapView(dimension.id)
     )
-      ? layerId
-      : getDefaultLayerId(dimension.id);
+      ? ALL_MAP_LAYERS_ID
+      : dimension.layers?.some(
+          (layer) => layer.id === layerId
+        )
+        ? layerId
+        : getDefaultLayerId(dimension.id);
 
   selectedMapLayerId = validLayer;
 
@@ -543,6 +619,7 @@ function setWorldContext(
     mapLayerSelect,
     selectedDimensionId,
     {
+      includeCombinedView: true,
       preferredValue: selectedMapLayerId,
     }
   );
@@ -561,6 +638,7 @@ function setWorldContext(
   }
 
   populateBiomeDropdown();
+  updateBiomeFeatureAvailability();
 
   if (refit) {
     fitMapToLocations(false);
@@ -569,14 +647,53 @@ function setWorldContext(
   renderAll();
 }
 
+function updateBiomeFeatureAvailability() {
+  const globallyEnabled = isBiomeFeatureEnabled();
+  const contextAllowsBiomes =
+    canUseBiomeFeatureInCurrentContext();
+
+  biomeToggleBtn.classList.toggle(
+    "hidden",
+    !globallyEnabled
+  );
+
+  const usable =
+    globallyEnabled &&
+    contextAllowsBiomes &&
+    biomeDatabaseReady &&
+    getBiomeOptionsForContext().length > 0;
+
+  biomeToggleBtn.disabled = !usable;
+
+  if (isAllLayersView()) {
+    biomeToggleBtn.title =
+      "choose a specific overworld layer to view or assign biomes";
+  } else {
+    biomeToggleBtn.title =
+      "show or hide assigned biome colors";
+  }
+
+  if (!contextAllowsBiomes && biomeOverlayEnabled) {
+    biomeOverlayEnabled = false;
+    selectedBiomeChunk = null;
+
+    biomeToggleBtn.classList.remove("is-active");
+    biomeToggleBtn.setAttribute("aria-pressed", "false");
+    biomeToggleBtn.textContent = "Biomes off";
+
+    hideBiomeTooltip();
+    biomeEditorCard.classList.add("hidden");
+  }
+}
+
 function initializeWorldControls() {
   populateDimensionSelect(dimensionSelect);
   populateDimensionSelect(locationDimensionSelect);
 
   if (!isBiomeFeatureEnabled()) {
-  biomeToggleBtn.classList.add("hidden");
-  biomeEditorCard.classList.add("hidden");
-}
+    biomeToggleBtn.classList.add("hidden");
+    biomeEditorCard.classList.add("hidden");
+  }
 
   const configuredDefault = getWorldConfig().defaultDimension;
   const enabledIds = getEnabledDimensions().map(
@@ -596,6 +713,7 @@ function initializeWorldControls() {
     mapLayerSelect,
     selectedDimensionId,
     {
+      includeCombinedView: true,
       preferredValue: selectedMapLayerId,
     }
   );
@@ -612,6 +730,7 @@ function initializeWorldControls() {
   );
 
   updateWorldContextDescription();
+  updateBiomeFeatureAvailability();
 }
 
 dimensionSelect.addEventListener("change", () => {
@@ -705,8 +824,7 @@ async function loadSharedMap() {
   }
 
   saveLocationBtn.disabled = !databaseReady;
-  biomeToggleBtn.disabled =
-    !biomeDatabaseReady || getBiomeOptions().length === 0;
+  updateBiomeFeatureAvailability();
 }
 
 /**********************************************************************
@@ -791,8 +909,13 @@ locationForm.addEventListener("submit", async (event) => {
       }
 
       const destinationLayer =
-        updatedLocation.mapLayer ||
-        getDefaultLayerId(updatedLocation.dimension);
+        (
+          selectedDimensionId === updatedLocation.dimension &&
+          isAllLayersView()
+        )
+          ? ALL_MAP_LAYERS_ID
+          : updatedLocation.mapLayer ||
+            getDefaultLayerId(updatedLocation.dimension);
 
       setWorldContext(
         updatedLocation.dimension,
@@ -821,8 +944,13 @@ locationForm.addEventListener("submit", async (event) => {
       locations.push(newLocation);
 
       const destinationLayer =
-        newLocation.mapLayer ||
-        getDefaultLayerId(newLocation.dimension);
+        (
+          selectedDimensionId === newLocation.dimension &&
+          isAllLayersView()
+        )
+          ? ALL_MAP_LAYERS_ID
+          : newLocation.mapLayer ||
+            getDefaultLayerId(newLocation.dimension);
 
       setWorldContext(
         newLocation.dimension,
@@ -1786,6 +1914,7 @@ function selectLocation(id) {
   if (
     location.dimension !== selectedDimensionId ||
     (
+      !isAllLayersView() &&
       location.mapLayer !== null &&
       location.mapLayer !== selectedMapLayerId
     )
@@ -1869,10 +1998,11 @@ function updateBiomeColorPreview() {
 }
 
 function setBiomeOverlayEnabled(enabled) {
-  if (!isBiomeFeatureEnabled()) {
+  if (!canUseBiomeFeatureInCurrentContext()) {
     biomeOverlayEnabled = false;
     return;
   }
+
   biomeOverlayEnabled = Boolean(enabled);
 
   biomeToggleBtn.classList.toggle(
@@ -2345,7 +2475,7 @@ mapSvg.addEventListener("pointercancel", finishMapPan);
 
 mapSvg.addEventListener("click", (event) => {
   if (
-    !isBiomeFeatureEnabled() ||
+    !canUseBiomeFeatureInCurrentContext() ||
     !biomeOverlayEnabled ||
     !biomeDatabaseReady ||
     Date.now() < suppressMapClickUntil
