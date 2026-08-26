@@ -1867,11 +1867,11 @@ function drawMarkers(transform) {
 
     const estimatedWidth = Math.max(56, labelText.length * 7.5 + 18);
     const labelX = Math.min(
-      Math.max(x + 10, 5),
+      Math.max(x + 8, 5),
       MAP_WIDTH - estimatedWidth - 5
     );
     const labelY = Math.min(
-      Math.max(y - 21, 22),
+      Math.max(y - 18, 22),
       MAP_HEIGHT - 10
     );
 
