@@ -21,7 +21,7 @@ window.WORLD_CONFIG = {
   dimensions: [
     {
       id: "overworld",
-      label: "Overworld",
+      label: "overworld",
       enabled: true,
       defaultLayer: "surface",
       portalScaleToOverworld: 1,
@@ -29,25 +29,25 @@ window.WORLD_CONFIG = {
       layers: [
         {
           id: "surface",
-          label: "Surface",
-          description: "The normal above-ground map.",
+          label: "surface",
+          description: "surface level, above-ground map",
         },
         {
           id: "underground",
-          label: "Underground",
-          description: "Caves and underground areas.",
+          label: "underground",
+          description: "caves and underground areas",
         },
         {
           id: "bottom",
-          label: "Bottom",
-          description: "The deep/bottom layer, including areas around Y -51.",
+          label: "bottom",
+          description: "deep/bottom layer, below Y -50",
         },
       ],
     },
 
     {
       id: "nether",
-      label: "Nether",
+      label: "nether",
       enabled: true,
       defaultLayer: "nether",
       portalScaleToOverworld: 8,
@@ -55,7 +55,7 @@ window.WORLD_CONFIG = {
       layers: [
         {
           id: "nether",
-          label: "Nether",
+          label: "nether",
           description: "The Nether map.",
         },
       ],
@@ -65,7 +65,7 @@ window.WORLD_CONFIG = {
     // Change enabled to true whenever you want to start mapping it.
     {
       id: "end",
-      label: "The End",
+      label: "the end",
       enabled: false,
       defaultLayer: "end",
       portalScaleToOverworld: null,
@@ -73,8 +73,8 @@ window.WORLD_CONFIG = {
       layers: [
         {
           id: "end",
-          label: "The End",
-          description: "The End map.",
+          label: "the end",
+          description: "map of the end",
         },
       ],
     },
