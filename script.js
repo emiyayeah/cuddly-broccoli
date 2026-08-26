@@ -599,6 +599,11 @@ function setWorldContext(
 
   selectedDimensionId = dimension.id;
 
+  mapSvg.classList.toggle(
+  "nether-map",
+  selectedDimensionId === "nether"
+);
+
   const validLayer =
     (
       layerId === ALL_MAP_LAYERS_ID &&
