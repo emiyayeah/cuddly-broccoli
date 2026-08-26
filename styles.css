@@ -432,19 +432,19 @@ h2 {
    --------------------------------------------------------------- */
 
 .map-svg.nether-map .chunk-grid-line {
-  stroke: #c27a70;
+  stroke: #ffa2ea;
 }
 
 .map-svg.nether-map .grid-line-minor {
-  stroke: #c27a70;
+  stroke: #ffa2ea;
 }
 
 .map-svg.nether-map .grid-line-major {
-  stroke: #944b47;
+  stroke: ##ff2d2d;
 }
 
 .map-svg.nether-map .axis-line {
-  stroke: #682d2d;
+  stroke: #881c5e;
 }
 
 .chunk-grid-line {
